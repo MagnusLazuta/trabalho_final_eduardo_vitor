@@ -75,7 +75,7 @@ Algumas das transformações controladas pelo usuário é movimentação do pers
 Como podemos ver na imagem, o jogo possui duas câmeras: uma câmera que "persegue" o personagem link (visão em terceira pessoa - câmera look at) e uma câmera que representa a visão em primeira pessoa (câmera livre) quando o personagem link mira com o estilingue para acertar nas aranhas.
 
 ### Instâncias de objetos
-<mark>`<preencher>`</mark>
+Esse requisito é garantido, pois temos objetos (por exemplo, aranhas, tochas) que possuem várias instâncias no mesmo local.
 
 ### Testes de intersecção
 Alguns testes de intersecção previstos é quando o personagem link faz o "paring"/reflete um objeto que um inimigo lança na sua direção. Outros testes de intersecção é quando o personagem link chega muito perto de um inimigo (no caso sofre dano) ou quando colido com uma parede ou um "alavanca" no cenário. 
