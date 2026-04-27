@@ -48,8 +48,8 @@
 >   será a base de comparação para avaliar se o seu trabalho final
 >   conseguiu ou não reproduzir a referência.
 -->
-- **Timestamp inicial**: <mark>`<preencher>`</mark>
-- **Timestamp final**: <mark>`<preencher>`</mark>
+- **Timestamp inicial**: <mark>`10:10`</mark>
+- **Timestamp final**: <mark>`21:30`</mark>
 
 ### Imagens
 
@@ -69,7 +69,7 @@ Para cada um dos requisitos abaixo (detalhados no [Enunciado do Trabalho final -
 Como visto nas imagens e no vídeo, tanto o cenário, personagem principal e os inimigos possuem uma malha poligonais complexas.  
 
 ### Transformações geométricas controladas pelo usuário
-<mark>`<preencher>`</mark>
+Algumas das transformações controladas pelo usuário é movimentação do personagem (translação) e a rotação e movimento da espada durante ataques.
 
 ### Diferentes tipos de câmeras
 Como podemos ver na imagem, o jogo possui duas câmeras: uma câmera que "persegue" o personagem link (visão em terceira pessoa - câmera look at) e uma câmera que representa a visão em primeira pessoa (câmera livre) quando o personagem link mira com o estilingue para acertar nas aranhas.
@@ -90,7 +90,7 @@ Alguns testes de intersecção previstos é quando o personagem link faz o "pari
 <mark>`<preencher>`</mark>
 
 ### Animações baseadas no tempo ($\Delta t$)
-<mark>`<preencher>`</mark>
+A fada que fica constantemente voando ao redor do personagem possui uma animação baseada em tempo, mesmo quando o personagem permanece parado.
 
 ## Limitações esperadas
 
