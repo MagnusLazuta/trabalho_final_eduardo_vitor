@@ -1,4 +1,4 @@
-<img width="1326" height="698" alt="image" src="https://github.com/user-attachments/assets/c414ecbc-225a-46cf-a8e1-8e29edd094c5" /># Especificação da Implementação
+# Especificação da Implementação
 
 <!--
 > [!CAUTION]
