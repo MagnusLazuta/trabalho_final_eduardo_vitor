@@ -1,4 +1,4 @@
-# Especificação da Implementação
+<img width="1326" height="698" alt="image" src="https://github.com/user-attachments/assets/c414ecbc-225a-46cf-a8e1-8e29edd094c5" /># Especificação da Implementação
 
 <!--
 > [!CAUTION]
@@ -48,18 +48,16 @@
 >   será a base de comparação para avaliar se o seu trabalho final
 >   conseguiu ou não reproduzir a referência.
 -->
-- **Timestamp inicial**: <mark>`10:10`</mark>
-- **Timestamp final**: <mark>`21:30`</mark>
+- **Timestamp inicial**: `12:50`
+- **Timestamp final**: `13:40`
 
 ### Imagens
 
-<!--
-> [!IMPORTANT]
-> - Coloque aqui **três imagens** capturadas do vídeo acima, que você
->   irá usar como ilustração para as explicações que vêm abaixo.
--->
+![Figura](images/image_1.png)
+![Figura](images/image_2.png)
+![Figura](images/image_3.png)
 
-<mark>`<preencher>`</mark>
+
 
 ## Especificação textual
 
@@ -81,16 +79,16 @@ Esse requisito é garantido, pois temos objetos (por exemplo, aranhas, tochas) q
 Alguns testes de intersecção previstos é quando o personagem link faz o "paring"/reflete um objeto que um inimigo lança na sua direção. Outros testes de intersecção é quando o personagem link chega muito perto de um inimigo (no caso sofre dano) ou quando colido com uma parede ou um "alavanca" no cenário. 
 
 ### Modelos de Iluminação em todos os objetos
-<mark>`<preencher>`</mark>
+O modelo de iluminação do jogo parece ser feito usando iluminação por vértices, mas se considerou usar um dos modelos de iluminação mais clássicos vistos em aula. A iluminação presente é visível nas texturas do cenário (principalmente chão e paredes), mas é imperfeita, principalmente ao redor de fontes de luz como tochas. 
 
 ### Mapeamento de texturas em todos os objetos
-<mark>`<preencher>`</mark>
+Como visto no vídeo, os objetos respeitam a restrição, possuindo cores texturizadas individuais, como as paredes, pilares, e inimigos.
 
 ### Movimentação com curva Bézier cúbica
 <mark>`<preencher>`</mark>
 
 ### Animações baseadas no tempo ($\Delta t$)
-A fada que fica constantemente voando ao redor do personagem possui uma animação baseada em tempo, mesmo quando o personagem permanece parado.
+A fada que fica constantemente voando ao redor do personagem possui uma animação baseada em tempo, rotacionando ao redor do personagem principal mesmo quando o mesmo permanece parado. Outro exemplo é a rotação dos itens encontrados em baús.
 
 ## Limitações esperadas
 
