@@ -85,18 +85,19 @@ O modelo de iluminação do jogo parece ser feito usando iluminação por vérti
 Como visto no vídeo, os objetos respeitam a restrição, possuindo cores texturizadas individuais, como as paredes, pilares, e inimigos.
 
 ### Movimentação com curva Bézier cúbica
-<mark>`<preencher>`</mark>
+No vídeo exemplo do jogo, nota-se que existem "cutscenes" feitas tempo de execução, onde a câmera pode seguir curva de bêzier cúbica. Exemplos de "cutscenes" quando a fase inicia (tempo: 10:15), quando o persoangem link abre um bau (tempo: 11:00) e quando o personagem link entra na arena do chefe final (tempo: 19:40).
 
 ### Animações baseadas no tempo ($\Delta t$)
 A fada que fica constantemente voando ao redor do personagem possui uma animação baseada em tempo, rotacionando ao redor do personagem principal mesmo quando o mesmo permanece parado. Outro exemplo é a rotação dos itens encontrados em baús.
 
 ## Limitações esperadas
 
+<!--
 > [!IMPORTANT]
 > - Coloque aqui uma lista de detalhes visuais ou de interação que
 >   aparecem no vídeo e/ou imagens acima, mas que você **não pretende
 >   implementar** ou que você **irá implementar parcialmente**.
 > - Para cada item, **explique por que** não será implementado ou por
 >   que será implementado parcialmente.
-
+-->
 <mark>`<preencher>`</mark>
