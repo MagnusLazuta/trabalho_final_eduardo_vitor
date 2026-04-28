@@ -100,4 +100,12 @@ A fada que fica constantemente voando ao redor do personagem possui uma animaç�
 > - Para cada item, **explique por que** não será implementado ou por
 >   que será implementado parcialmente.
 -->
-<mark>`<preencher>`</mark>
+1. Ausência da animação da planta (inimigo) "acordando" quando o personagem chega perto dela;
+2. Ausência de uma animação detalhada de quando as folhas do chão são destruídas;
+3. Ausência de certas interrupções/diálogos da fada do link (conversas com o personagem) quando apresenta o tutorial;
+4. Interfaces do jogo nem sempre 100% fiéis ao jogo, mas mantendo a funcionalidade, como o trocar o item que está utilizando ou ver o mapa;
+5. Ausência efeitos especiais quando se abre um bau;
+6. Ausência de efeitos especiais de quando a fada deixa rastros enquanto o personagem caminha;
+7. Ausência de efeitos especiais dos rastros quando o personagem está carregando uma tocha com fogo;
+8. Ausência de fidelidade dos efeitos especiais de quando o boss final é derrotado no final da fase;
+9. Ausência de fidelidade dos modelos e texturas comparado com o do vídeo, pois como estamos replicando nem sempre os modelos e texturas são os equivalentes quando se procura na internet.
