@@ -109,3 +109,5 @@ A fada que fica constantemente voando ao redor do personagem possui uma animaç�
 7. Ausência de efeitos especiais dos rastros quando o personagem está carregando uma tocha com fogo;
 8. Ausência de fidelidade dos efeitos especiais de quando o boss final é derrotado no final da fase;
 9. Ausência de fidelidade dos modelos e texturas comparado com o do vídeo, pois como estamos replicando nem sempre os modelos e texturas são os equivalentes quando se procura na internet.
+
+> Comentário Professor: OK
