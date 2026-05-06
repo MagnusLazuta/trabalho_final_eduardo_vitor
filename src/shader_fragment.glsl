@@ -22,7 +22,10 @@ uniform mat4 projection;
 #define SPHERE 0
 #define BUNNY  1
 #define PLANE  2
+#define SCENARIO 3
+#define PLAYER_CUBE 4
 uniform int object_id;
+uniform int cube_colliding;
 
 // Parâmetros da axis-aligned bounding box (AABB) do modelo
 uniform vec4 bbox_min;
@@ -69,7 +72,7 @@ void main()
     float V = 0.0;
 
 	// Coeficiente de refletância difusa
-	vec3 Kd0;
+	vec3 Kd0 = vec3(0.7, 0.7, 0.7);
 
     if ( object_id == SPHERE )
     {
@@ -134,6 +137,14 @@ void main()
 		// Obtemos a refletância difusa a partir da leitura da imagem TextureImage1
 		Kd0 = texture(TextureImage1, vec2(U,V)).rgb;
     }
+    else if ( object_id == SCENARIO )
+    {
+        Kd0 = vec3(0.55, 0.55, 0.62);
+    }
+    else if ( object_id == PLAYER_CUBE )
+    {
+        Kd0 = (cube_colliding == 1) ? vec3(0.95, 0.20, 0.20) : vec3(0.20, 0.85, 0.30);
+    }
 
     // Equação de Iluminação
     float lambert = max(0,dot(n,l));
@@ -158,4 +169,3 @@ void main()
     // Veja https://en.wikipedia.org/w/index.php?title=Gamma_correction&oldid=751281772#Windows.2C_Mac.2C_sRGB_and_TV.2Fvideo_standard_gammas
     color.rgb = pow(color.rgb, vec3(1.0,1.0,1.0)/2.2);
 } 
-

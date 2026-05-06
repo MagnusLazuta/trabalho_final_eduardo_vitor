@@ -37,6 +37,7 @@
 
 // Headers da biblioteca GLM: criação de matrizes e vetores.
 #include <glm/mat4x4.hpp>
+#include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -124,6 +125,9 @@ GLuint LoadShader_Fragment(const char* filename); // Carrega um fragment shader
 void LoadShader(const char* filename, GLuint shader_id); // Função utilizada pelas duas acima
 GLuint CreateGpuProgram(GLuint vertex_shader_id, GLuint fragment_shader_id); // Cria um programa de GPU
 void PrintObjModelInfo(ObjModel*); // Função para debugging
+void BuildUnitCubeAndAddToVirtualScene(const char* object_name); // Constrói cubo unitário para teste de colisão
+void BuildCollisionDataFromObjModel(ObjModel* model, glm::mat4 model_matrix); // Constrói dados de colisão para o cenário
+bool CollidesWithScenario(const glm::vec3& cube_center); // Testa colisão do cubo com o cenário
 
 // Declaração de funções auxiliares para renderizar texto dentro da janela
 // OpenGL. Estas funções estão definidas no arquivo "textrendering.cpp".
@@ -166,6 +170,20 @@ struct SceneObject
     glm::vec3    bbox_max;
 };
 
+struct Triangle
+{
+    glm::vec3 v0;
+    glm::vec3 v1;
+    glm::vec3 v2;
+};
+
+struct CollisionShape
+{
+    glm::vec3 bbox_min;
+    glm::vec3 bbox_max;
+    std::vector<Triangle> triangles;
+};
+
 // Abaixo definimos variáveis globais utilizadas em várias funções do código.
 
 // A cena virtual é uma lista de objetos nomeados, guardados em um dicionário
@@ -176,6 +194,18 @@ std::map<std::string, SceneObject> g_VirtualScene;
 
 // Pilha que guardará as matrizes de modelagem.
 std::stack<glm::mat4>  g_MatrixStack;
+std::vector<std::string> g_ScenarioObjectNames;
+std::vector<CollisionShape> g_ScenarioCollisionShapes;
+
+glm::vec3 g_ScenarioBoundsMin = glm::vec3(+std::numeric_limits<float>::infinity());
+glm::vec3 g_ScenarioBoundsMax = glm::vec3(-std::numeric_limits<float>::infinity());
+
+const glm::vec3 g_ScenarioOriginalCenter(2.456616f, 4.166221f, 1.275183f);
+const float g_ScenarioScale = 0.22f;
+
+glm::vec3 g_PlayerCubeHalfExtents(0.30f, 0.30f, 0.30f);
+glm::vec3 g_PlayerCubePosition(0.0f, 0.0f, 0.0f);
+bool g_PlayerCubeColliding = false;
 
 // Razão de proporção da janela (largura/altura). Veja função FramebufferSizeCallback().
 float g_ScreenRatio = 1.0f;
@@ -197,7 +227,9 @@ bool g_MiddleMouseButtonPressed = false; // Análogo para botão do meio do mous
 // renderização.
 float g_CameraTheta = 0.0f; // Ângulo no plano ZX em relação ao eixo Z
 float g_CameraPhi = 0.0f;   // Ângulo em relação ao eixo Y
-float g_CameraDistance = 3.5f; // Distância da câmera para a origem
+float g_CameraDistance = 14.0f; // Distância da câmera para a origem
+glm::vec3 g_ThirdPersonCameraOffset(0.0f, 1.4f, 3.2f);
+float g_ThirdPersonLookAtHeight = 0.4f;
 
 // Variáveis que controlam rotação do antebraço
 float g_ForearmAngleZ = 0.0f;
@@ -221,9 +253,19 @@ GLint g_projection_uniform;
 GLint g_object_id_uniform;
 GLint g_bbox_min_uniform;
 GLint g_bbox_max_uniform;
+GLint g_cube_colliding_uniform;
 
 // Número de texturas carregadas pela função LoadTextureImage()
 GLuint g_NumLoadedTextures = 0;
+
+const int OBJECT_ID_SCENARIO = 3;
+const int OBJECT_ID_PLAYER_CUBE = 4;
+
+glm::mat4 GetScenarioModelMatrix()
+{
+    return Matrix_Scale(g_ScenarioScale, g_ScenarioScale, g_ScenarioScale)
+         * Matrix_Translate(-g_ScenarioOriginalCenter.x, -g_ScenarioOriginalCenter.y, -g_ScenarioOriginalCenter.z);
+}
 
 int main(int argc, char* argv[])
 {
@@ -302,23 +344,32 @@ int main(int argc, char* argv[])
     LoadTextureImage("../../data/red_brick_diff_1k.jpg");      // TextureImage0
     LoadTextureImage("../../data/rocky_terrain_02_diff_1k.jpg"); // TextureImage1
 
-    // Construímos a representação de objetos geométricos através de malhas de triângulos
-    ObjModel spheremodel("../../data/sphere.obj");
-    ComputeNormals(&spheremodel);
-    BuildTrianglesAndAddToVirtualScene(&spheremodel);
+    // Carregamos o cenário principal e construímos sua malha de renderização.
+    ObjModel scenario_model("../../models/fase1.obj");
+    ComputeNormals(&scenario_model);
+    BuildTrianglesAndAddToVirtualScene(&scenario_model);
 
-    ObjModel bunnymodel("../../data/bunny.obj");
-    ComputeNormals(&bunnymodel);
-    BuildTrianglesAndAddToVirtualScene(&bunnymodel);
-
-    ObjModel planemodel("../../data/plane.obj");
-    ComputeNormals(&planemodel);
-    BuildTrianglesAndAddToVirtualScene(&planemodel);
-
-    if ( argc > 1 )
+    for (size_t i = 0; i < scenario_model.shapes.size(); ++i)
     {
-        ObjModel model(argv[1]);
-        BuildTrianglesAndAddToVirtualScene(&model);
+        g_ScenarioObjectNames.push_back(scenario_model.shapes[i].name);
+    }
+
+    // Construímos um cubo unitário para atuar como "player" no teste de colisão.
+    BuildUnitCubeAndAddToVirtualScene("player_cube");
+
+    // Construímos os dados usados pelo sistema de colisão.
+    BuildCollisionDataFromObjModel(&scenario_model, GetScenarioModelMatrix());
+
+    // Posiciona o cubo inicialmente próximo ao chão do cenário e fora de colisão.
+    g_PlayerCubePosition = glm::vec3(
+        (g_ScenarioBoundsMin.x + g_ScenarioBoundsMax.x) * 0.5f,
+        g_ScenarioBoundsMin.y + g_PlayerCubeHalfExtents.y + 0.05f,
+        (g_ScenarioBoundsMin.z + g_ScenarioBoundsMax.z) * 0.5f
+    );
+
+    for (int tries = 0; tries < 200 && CollidesWithScenario(g_PlayerCubePosition); ++tries)
+    {
+        g_PlayerCubePosition.y += 0.10f;
     }
 
     // Inicializamos o código para renderização de texto.
@@ -332,9 +383,70 @@ int main(int argc, char* argv[])
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
 
+    double previous_frame_time = glfwGetTime();
+
     // Ficamos em um loop infinito, renderizando, até que o usuário feche a janela
     while (!glfwWindowShouldClose(window))
     {
+        const double current_frame_time = glfwGetTime();
+        const float delta_time = static_cast<float>(current_frame_time - previous_frame_time);
+        previous_frame_time = current_frame_time;
+
+        // Movimentação básica do cubo de teste (WASD + SPACE/SHIFT).
+        glm::vec3 intended_move(0.0f, 0.0f, 0.0f);
+        const float move_speed = 3.5f;
+
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) intended_move.z -= 1.0f;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) intended_move.z += 1.0f;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) intended_move.x -= 1.0f;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) intended_move.x += 1.0f;
+        if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) intended_move.y += 1.0f; // sobe
+        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) intended_move.y -= 1.0f; // desce
+
+        const float intended_move_length = std::sqrt(
+            intended_move.x * intended_move.x +
+            intended_move.y * intended_move.y +
+            intended_move.z * intended_move.z
+        );
+        if (intended_move_length > 0.0f)
+        {
+            intended_move = (intended_move / intended_move_length) * move_speed * delta_time;
+        }
+
+        // Tentamos mover por eixo para permitir "slide" na parede.
+        glm::vec3 updated_position = g_PlayerCubePosition;
+
+        glm::vec3 test_position_x = updated_position;
+        test_position_x.x += intended_move.x;
+        if (!CollidesWithScenario(test_position_x))
+        {
+            updated_position.x = test_position_x.x;
+        }
+
+        glm::vec3 test_position_z = updated_position;
+        test_position_z.z += intended_move.z;
+        if (!CollidesWithScenario(test_position_z))
+        {
+            updated_position.z = test_position_z.z;
+        }
+
+        glm::vec3 test_position_y = updated_position;
+        test_position_y.y += intended_move.y;
+        if (!CollidesWithScenario(test_position_y))
+        {
+            updated_position.y = test_position_y.y;
+        }
+
+        g_PlayerCubePosition = updated_position;
+        g_PlayerCubeColliding = CollidesWithScenario(g_PlayerCubePosition);
+
+        glfwSetWindowTitle(
+            window,
+            g_PlayerCubeColliding ?
+                "INF01047 - Colisao: DETECTADA | Movimento: WASD+SPACE+SHIFT | Camera: 3a pessoa fixa" :
+                "INF01047 - Colisao: livre | Movimento: WASD+SPACE+SHIFT | Camera: 3a pessoa fixa"
+        );
+
         // Aqui executamos as operações de renderização
 
         // Definimos a cor do "fundo" do framebuffer como branco.  Tal cor é
@@ -353,19 +465,14 @@ int main(int argc, char* argv[])
         // os shaders de vértice e fragmentos).
         glUseProgram(g_GpuProgramID);
 
-        // Computamos a posição da câmera utilizando coordenadas esféricas.  As
-        // variáveis g_CameraDistance, g_CameraPhi, e g_CameraTheta são
-        // controladas pelo mouse do usuário. Veja as funções CursorPosCallback()
-        // e ScrollCallback().
-        float r = g_CameraDistance;
-        float y = r*sin(g_CameraPhi);
-        float z = r*cos(g_CameraPhi)*cos(g_CameraTheta);
-        float x = r*cos(g_CameraPhi)*sin(g_CameraTheta);
+        // Câmera em terceira pessoa fixa: mantém a mesma orientação e apenas segue o cubo.
+        glm::vec3 camera_position_world = g_PlayerCubePosition + g_ThirdPersonCameraOffset;
+        glm::vec3 camera_lookat_world =
+            g_PlayerCubePosition + glm::vec3(0.0f, g_ThirdPersonLookAtHeight, 0.0f);
 
         // Abaixo definimos as varáveis que efetivamente definem a câmera virtual.
-        // Veja slides 195-227 e 229-234 do documento Aula_08_Sistemas_de_Coordenadas.pdf.
-        glm::vec4 camera_position_c  = glm::vec4(x,y,z,1.0f); // Ponto "c", centro da câmera
-        glm::vec4 camera_lookat_l    = glm::vec4(0.0f,0.0f,0.0f,1.0f); // Ponto "l", para onde a câmera (look-at) estará sempre olhando
+        glm::vec4 camera_position_c  = glm::vec4(camera_position_world.x, camera_position_world.y, camera_position_world.z, 1.0f); // Ponto "c", centro da câmera
+        glm::vec4 camera_lookat_l    = glm::vec4(camera_lookat_world.x, camera_lookat_world.y, camera_lookat_world.z, 1.0f); // Ponto "l", para onde a câmera (look-at) estará olhando
         glm::vec4 camera_view_vector = camera_lookat_l - camera_position_c; // Vetor "view", sentido para onde a câmera está virada
         glm::vec4 camera_up_vector   = glm::vec4(0.0f,1.0f,0.0f,0.0f); // Vetor "up" fixado para apontar para o "céu" (eito Y global)
 
@@ -379,7 +486,7 @@ int main(int argc, char* argv[])
         // Note que, no sistema de coordenadas da câmera, os planos near e far
         // estão no sentido negativo! Veja slides 176-204 do documento Aula_09_Projecoes.pdf.
         float nearplane = -0.1f;  // Posição do "near plane"
-        float farplane  = -10.0f; // Posição do "far plane"
+        float farplane  = -80.0f; // Posição do "far plane"
 
         if (g_UsePerspectiveProjection)
         {
@@ -410,31 +517,27 @@ int main(int argc, char* argv[])
         glUniformMatrix4fv(g_view_uniform       , 1 , GL_FALSE , glm::value_ptr(view));
         glUniformMatrix4fv(g_projection_uniform , 1 , GL_FALSE , glm::value_ptr(projection));
 
-        #define SPHERE 0
-        #define BUNNY  1
-        #define PLANE  2
-
-        // Desenhamos o modelo da esfera
-        model = Matrix_Translate(-1.0f,0.0f,0.0f)
-              * Matrix_Rotate_Z(0.6f)
-              * Matrix_Rotate_X(0.2f)
-              * Matrix_Rotate_Y(g_AngleY + (float)glfwGetTime() * 0.1f);
+        // Desenhamos o cenário carregado de models/fase1.obj.
+        model = GetScenarioModelMatrix();
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, SPHERE);
-        DrawVirtualObject("the_sphere");
+        glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
+        glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
+        for (size_t i = 0; i < g_ScenarioObjectNames.size(); ++i)
+        {
+            DrawVirtualObject(g_ScenarioObjectNames[i].c_str());
+        }
 
-        // Desenhamos o modelo do coelho
-        model = Matrix_Translate(1.0f,0.0f,0.0f)
-              * Matrix_Rotate_X(g_AngleX + (float)glfwGetTime() * 0.1f);
+        // Desenhamos o cubo de teste.
+        model = Matrix_Translate(g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z)
+              * Matrix_Scale(
+                    2.0f * g_PlayerCubeHalfExtents.x,
+                    2.0f * g_PlayerCubeHalfExtents.y,
+                    2.0f * g_PlayerCubeHalfExtents.z
+                );
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, BUNNY);
-        DrawVirtualObject("the_bunny");
-
-        // Desenhamos o plano do chão
-        model = Matrix_Translate(0.0f,-1.1f,0.0f);
-        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, PLANE);
-        DrawVirtualObject("the_plane");
+        glUniform1i(g_object_id_uniform, OBJECT_ID_PLAYER_CUBE);
+        glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
+        DrawVirtualObject("player_cube");
 
         // Imprimimos na tela os ângulos de Euler que controlam a rotação do
         // terceiro cubo.
@@ -596,6 +699,7 @@ void LoadShadersFromFiles()
     g_object_id_uniform  = glGetUniformLocation(g_GpuProgramID, "object_id"); // Variável "object_id" em shader_fragment.glsl
     g_bbox_min_uniform   = glGetUniformLocation(g_GpuProgramID, "bbox_min");
     g_bbox_max_uniform   = glGetUniformLocation(g_GpuProgramID, "bbox_max");
+    g_cube_colliding_uniform = glGetUniformLocation(g_GpuProgramID, "cube_colliding");
 
     // Variáveis em "shader_fragment.glsl" para acesso das imagens de textura
     glUseProgram(g_GpuProgramID);
@@ -885,6 +989,279 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel* model)
     // "Desligamos" o VAO, evitando assim que operações posteriores venham a
     // alterar o mesmo. Isso evita bugs.
     glBindVertexArray(0);
+}
+
+void BuildUnitCubeAndAddToVirtualScene(const char* object_name)
+{
+    GLuint vertex_array_object_id;
+    glGenVertexArrays(1, &vertex_array_object_id);
+    glBindVertexArray(vertex_array_object_id);
+
+    const float vertices[] = {
+        // Frente (+Z)
+        -0.5f, -0.5f, +0.5f,  +0.5f, -0.5f, +0.5f,  +0.5f, +0.5f, +0.5f,
+        -0.5f, -0.5f, +0.5f,  +0.5f, +0.5f, +0.5f,  -0.5f, +0.5f, +0.5f,
+        // Trás (-Z)
+        +0.5f, -0.5f, -0.5f,  -0.5f, -0.5f, -0.5f,  -0.5f, +0.5f, -0.5f,
+        +0.5f, -0.5f, -0.5f,  -0.5f, +0.5f, -0.5f,  +0.5f, +0.5f, -0.5f,
+        // Esquerda (-X)
+        -0.5f, -0.5f, -0.5f,  -0.5f, -0.5f, +0.5f,  -0.5f, +0.5f, +0.5f,
+        -0.5f, -0.5f, -0.5f,  -0.5f, +0.5f, +0.5f,  -0.5f, +0.5f, -0.5f,
+        // Direita (+X)
+        +0.5f, -0.5f, +0.5f,  +0.5f, -0.5f, -0.5f,  +0.5f, +0.5f, -0.5f,
+        +0.5f, -0.5f, +0.5f,  +0.5f, +0.5f, -0.5f,  +0.5f, +0.5f, +0.5f,
+        // Topo (+Y)
+        -0.5f, +0.5f, +0.5f,  +0.5f, +0.5f, +0.5f,  +0.5f, +0.5f, -0.5f,
+        -0.5f, +0.5f, +0.5f,  +0.5f, +0.5f, -0.5f,  -0.5f, +0.5f, -0.5f,
+        // Base (-Y)
+        -0.5f, -0.5f, -0.5f,  +0.5f, -0.5f, -0.5f,  +0.5f, -0.5f, +0.5f,
+        -0.5f, -0.5f, -0.5f,  +0.5f, -0.5f, +0.5f,  -0.5f, -0.5f, +0.5f
+    };
+
+    const float normals[] = {
+         0,  0, +1,   0,  0, +1,   0,  0, +1,   0,  0, +1,   0,  0, +1,   0,  0, +1,
+         0,  0, -1,   0,  0, -1,   0,  0, -1,   0,  0, -1,   0,  0, -1,   0,  0, -1,
+        -1,  0,  0,  -1,  0,  0,  -1,  0,  0,  -1,  0,  0,  -1,  0,  0,  -1,  0,  0,
+        +1,  0,  0,  +1,  0,  0,  +1,  0,  0,  +1,  0,  0,  +1,  0,  0,  +1,  0,  0,
+         0, +1,  0,   0, +1,  0,   0, +1,  0,   0, +1,  0,   0, +1,  0,   0, +1,  0,
+         0, -1,  0,   0, -1,  0,   0, -1,  0,   0, -1,  0,   0, -1,  0,   0, -1,  0
+    };
+
+    std::vector<float> model_coefficients;
+    std::vector<float> normal_coefficients;
+    std::vector<float> texture_coefficients;
+    std::vector<GLuint> indices;
+
+    model_coefficients.reserve(36 * 4);
+    normal_coefficients.reserve(36 * 4);
+    texture_coefficients.reserve(36 * 2);
+    indices.reserve(36);
+
+    for (GLuint i = 0; i < 36; ++i)
+    {
+        model_coefficients.push_back(vertices[3 * i + 0]);
+        model_coefficients.push_back(vertices[3 * i + 1]);
+        model_coefficients.push_back(vertices[3 * i + 2]);
+        model_coefficients.push_back(1.0f);
+
+        normal_coefficients.push_back(normals[3 * i + 0]);
+        normal_coefficients.push_back(normals[3 * i + 1]);
+        normal_coefficients.push_back(normals[3 * i + 2]);
+        normal_coefficients.push_back(0.0f);
+
+        texture_coefficients.push_back(0.0f);
+        texture_coefficients.push_back(0.0f);
+
+        indices.push_back(i);
+    }
+
+    GLuint VBO_model_coefficients_id;
+    glGenBuffers(1, &VBO_model_coefficients_id);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_model_coefficients_id);
+    glBufferData(GL_ARRAY_BUFFER, model_coefficients.size() * sizeof(float), model_coefficients.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(0);
+
+    GLuint VBO_normal_coefficients_id;
+    glGenBuffers(1, &VBO_normal_coefficients_id);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_normal_coefficients_id);
+    glBufferData(GL_ARRAY_BUFFER, normal_coefficients.size() * sizeof(float), normal_coefficients.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(1);
+
+    GLuint VBO_texture_coefficients_id;
+    glGenBuffers(1, &VBO_texture_coefficients_id);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_texture_coefficients_id);
+    glBufferData(GL_ARRAY_BUFFER, texture_coefficients.size() * sizeof(float), texture_coefficients.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(2);
+
+    GLuint indices_id;
+    glGenBuffers(1, &indices_id);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indices_id);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(GLuint), indices.data(), GL_STATIC_DRAW);
+
+    SceneObject cube;
+    cube.name = object_name;
+    cube.first_index = 0;
+    cube.num_indices = indices.size();
+    cube.rendering_mode = GL_TRIANGLES;
+    cube.vertex_array_object_id = vertex_array_object_id;
+    cube.bbox_min = glm::vec3(-0.5f, -0.5f, -0.5f);
+    cube.bbox_max = glm::vec3(+0.5f, +0.5f, +0.5f);
+    g_VirtualScene[object_name] = cube;
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+}
+
+static bool AabbIntersects(
+    const glm::vec3& min_a, const glm::vec3& max_a,
+    const glm::vec3& min_b, const glm::vec3& max_b
+)
+{
+    return min_a.x <= max_b.x && max_a.x >= min_b.x &&
+           min_a.y <= max_b.y && max_a.y >= min_b.y &&
+           min_a.z <= max_b.z && max_a.z >= min_b.z;
+}
+
+static bool OverlapOnAxis(
+    const glm::vec3& v0,
+    const glm::vec3& v1,
+    const glm::vec3& v2,
+    const glm::vec3& axis,
+    const glm::vec3& half_extents
+)
+{
+    const float eps = 1e-7f;
+    if (dotproduct(glm::vec4(axis, 0.0f), glm::vec4(axis, 0.0f)) < eps)
+        return true;
+
+    const float p0 = dotproduct(glm::vec4(v0, 0.0f), glm::vec4(axis, 0.0f));
+    const float p1 = dotproduct(glm::vec4(v1, 0.0f), glm::vec4(axis, 0.0f));
+    const float p2 = dotproduct(glm::vec4(v2, 0.0f), glm::vec4(axis, 0.0f));
+    const float tri_min = std::min(p0, std::min(p1, p2));
+    const float tri_max = std::max(p0, std::max(p1, p2));
+
+    const float r =
+        half_extents.x * std::fabs(axis.x) +
+        half_extents.y * std::fabs(axis.y) +
+        half_extents.z * std::fabs(axis.z);
+
+    return !(tri_min > r || tri_max < -r);
+}
+
+static bool TriangleIntersectsAabb(
+    const Triangle& triangle,
+    const glm::vec3& box_center,
+    const glm::vec3& box_half_extents
+)
+{
+    // Colocamos tudo no referencial local da AABB (caixa centrada na origem).
+    const glm::vec3 v0 = triangle.v0 - box_center;
+    const glm::vec3 v1 = triangle.v1 - box_center;
+    const glm::vec3 v2 = triangle.v2 - box_center;
+
+    const glm::vec3 e0 = v1 - v0;
+    const glm::vec3 e1 = v2 - v1;
+    const glm::vec3 e2 = v0 - v2;
+    const glm::vec3 edges[3] = { e0, e1, e2 };
+    const glm::vec3 axis_basis[3] =
+    {
+        glm::vec3(1.0f, 0.0f, 0.0f),
+        glm::vec3(0.0f, 1.0f, 0.0f),
+        glm::vec3(0.0f, 0.0f, 1.0f),
+    };
+
+    // SAT: 3 eixos da AABB
+    if (std::max(v0.x, std::max(v1.x, v2.x)) < -box_half_extents.x || std::min(v0.x, std::min(v1.x, v2.x)) > box_half_extents.x) return false;
+    if (std::max(v0.y, std::max(v1.y, v2.y)) < -box_half_extents.y || std::min(v0.y, std::min(v1.y, v2.y)) > box_half_extents.y) return false;
+    if (std::max(v0.z, std::max(v1.z, v2.z)) < -box_half_extents.z || std::min(v0.z, std::min(v1.z, v2.z)) > box_half_extents.z) return false;
+
+    // SAT: 9 eixos cruzamento aresta-triângulo X eixo-caixa
+    for (int edge_index = 0; edge_index < 3; ++edge_index)
+    {
+        for (int axis_index = 0; axis_index < 3; ++axis_index)
+        {
+            const glm::vec4 axis4 = crossproduct(
+                glm::vec4(edges[edge_index], 0.0f),
+                glm::vec4(axis_basis[axis_index], 0.0f)
+            );
+            const glm::vec3 axis(axis4.x, axis4.y, axis4.z);
+            if (!OverlapOnAxis(v0, v1, v2, axis, box_half_extents))
+                return false;
+        }
+    }
+
+    // SAT: eixo normal do triângulo
+    const glm::vec4 tri_normal4 = crossproduct(glm::vec4(e0, 0.0f), glm::vec4(e1, 0.0f));
+    const glm::vec3 tri_normal(tri_normal4.x, tri_normal4.y, tri_normal4.z);
+    if (!OverlapOnAxis(v0, v1, v2, tri_normal, box_half_extents))
+        return false;
+
+    return true;
+}
+
+void BuildCollisionDataFromObjModel(ObjModel* model, glm::mat4 model_matrix)
+{
+    g_ScenarioCollisionShapes.clear();
+    g_ScenarioBoundsMin = glm::vec3(+std::numeric_limits<float>::infinity());
+    g_ScenarioBoundsMax = glm::vec3(-std::numeric_limits<float>::infinity());
+
+    for (size_t shape = 0; shape < model->shapes.size(); ++shape)
+    {
+        CollisionShape shape_collision;
+        shape_collision.bbox_min = glm::vec3(+std::numeric_limits<float>::infinity());
+        shape_collision.bbox_max = glm::vec3(-std::numeric_limits<float>::infinity());
+
+        const size_t num_triangles = model->shapes[shape].mesh.num_face_vertices.size();
+        shape_collision.triangles.reserve(num_triangles);
+
+        for (size_t triangle = 0; triangle < num_triangles; ++triangle)
+        {
+            assert(model->shapes[shape].mesh.num_face_vertices[triangle] == 3);
+
+            Triangle world_triangle;
+            for (size_t vertex = 0; vertex < 3; ++vertex)
+            {
+                const tinyobj::index_t idx = model->shapes[shape].mesh.indices[3 * triangle + vertex];
+                const glm::vec4 p_model(
+                    model->attrib.vertices[3 * idx.vertex_index + 0],
+                    model->attrib.vertices[3 * idx.vertex_index + 1],
+                    model->attrib.vertices[3 * idx.vertex_index + 2],
+                    1.0f
+                );
+                const glm::vec4 p_world = model_matrix * p_model;
+                const glm::vec3 p = glm::vec3(p_world.x, p_world.y, p_world.z);
+
+                if (vertex == 0) world_triangle.v0 = p;
+                if (vertex == 1) world_triangle.v1 = p;
+                if (vertex == 2) world_triangle.v2 = p;
+
+                shape_collision.bbox_min.x = std::min(shape_collision.bbox_min.x, p.x);
+                shape_collision.bbox_min.y = std::min(shape_collision.bbox_min.y, p.y);
+                shape_collision.bbox_min.z = std::min(shape_collision.bbox_min.z, p.z);
+                shape_collision.bbox_max.x = std::max(shape_collision.bbox_max.x, p.x);
+                shape_collision.bbox_max.y = std::max(shape_collision.bbox_max.y, p.y);
+                shape_collision.bbox_max.z = std::max(shape_collision.bbox_max.z, p.z);
+            }
+
+            shape_collision.triangles.push_back(world_triangle);
+        }
+
+        g_ScenarioBoundsMin.x = std::min(g_ScenarioBoundsMin.x, shape_collision.bbox_min.x);
+        g_ScenarioBoundsMin.y = std::min(g_ScenarioBoundsMin.y, shape_collision.bbox_min.y);
+        g_ScenarioBoundsMin.z = std::min(g_ScenarioBoundsMin.z, shape_collision.bbox_min.z);
+        g_ScenarioBoundsMax.x = std::max(g_ScenarioBoundsMax.x, shape_collision.bbox_max.x);
+        g_ScenarioBoundsMax.y = std::max(g_ScenarioBoundsMax.y, shape_collision.bbox_max.y);
+        g_ScenarioBoundsMax.z = std::max(g_ScenarioBoundsMax.z, shape_collision.bbox_max.z);
+
+        g_ScenarioCollisionShapes.push_back(shape_collision);
+    }
+}
+
+bool CollidesWithScenario(const glm::vec3& cube_center)
+{
+    const glm::vec3 cube_min = cube_center - g_PlayerCubeHalfExtents;
+    const glm::vec3 cube_max = cube_center + g_PlayerCubeHalfExtents;
+
+    for (size_t shape_index = 0; shape_index < g_ScenarioCollisionShapes.size(); ++shape_index)
+    {
+        const CollisionShape& shape = g_ScenarioCollisionShapes[shape_index];
+
+        // Broad phase: filtra apenas formas com sobreposição de AABB.
+        if (!AabbIntersects(cube_min, cube_max, shape.bbox_min, shape.bbox_max))
+            continue;
+
+        // Narrow phase: testa triângulo-a-triângulo (AABB do cubo vs triângulo).
+        for (size_t triangle_index = 0; triangle_index < shape.triangles.size(); ++triangle_index)
+        {
+            if (TriangleIntersectsAabb(shape.triangles[triangle_index], cube_center, g_PlayerCubeHalfExtents))
+                return true;
+        }
+    }
+
+    return false;
 }
 
 // Carrega um Vertex Shader de um arquivo GLSL. Veja definição de LoadShader() abaixo.
@@ -1585,4 +1962,3 @@ void PrintObjModelInfo(ObjModel* model)
 
 // set makeprg=cd\ ..\ &&\ make\ run\ >/dev/null
 // vim: set spell spelllang=pt_br :
-
