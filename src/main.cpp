@@ -128,6 +128,9 @@ void PrintObjModelInfo(ObjModel*); // Função para debugging
 void BuildUnitCubeAndAddToVirtualScene(const char* object_name); // Constrói cubo unitário para teste de colisão
 void BuildCollisionDataFromObjModel(ObjModel* model, glm::mat4 model_matrix); // Constrói dados de colisão para o cenário
 bool CollidesWithScenario(const glm::vec3& cube_center); // Testa colisão do cubo com o cenário
+bool CollidesWithScenarioAabb(const glm::vec3& center, const glm::vec3& half_extents); // Testa colisão de AABB genérica com o cenário
+void ComputeObjBounds(ObjModel* model, glm::vec3& bbox_min, glm::vec3& bbox_max);
+glm::vec3 ComputeCameraPositionWithCollision(const glm::vec3& lookat_position, const glm::vec3& desired_camera_position);
 
 // Declaração de funções auxiliares para renderizar texto dentro da janela
 // OpenGL. Estas funções estão definidas no arquivo "textrendering.cpp".
@@ -200,11 +203,14 @@ std::vector<CollisionShape> g_ScenarioCollisionShapes;
 glm::vec3 g_ScenarioBoundsMin = glm::vec3(+std::numeric_limits<float>::infinity());
 glm::vec3 g_ScenarioBoundsMax = glm::vec3(-std::numeric_limits<float>::infinity());
 
-const glm::vec3 g_ScenarioOriginalCenter(2.456616f, 4.166221f, 1.275183f);
-const float g_ScenarioScale = 0.22f;
+glm::mat4 g_ScenarioModelMatrix = Matrix_Identity();
+const char* g_SceneMapPath = "../../assets/scenes/scene00/map.obj";
+const char* g_SceneCollisionPath = "../../assets/scenes/scene00/collision.obj";
 
 glm::vec3 g_PlayerCubeHalfExtents(0.30f, 0.30f, 0.30f);
 glm::vec3 g_PlayerCubePosition(0.0f, 0.0f, 0.0f);
+const glm::vec3 g_HardcodedTestSpawnPosition(2.46f, 4.80f, 1.28f);
+float g_PlayerYaw = 0.0f;
 bool g_PlayerCubeColliding = false;
 
 // Razão de proporção da janela (largura/altura). Veja função FramebufferSizeCallback().
@@ -228,8 +234,15 @@ bool g_MiddleMouseButtonPressed = false; // Análogo para botão do meio do mous
 float g_CameraTheta = 0.0f; // Ângulo no plano ZX em relação ao eixo Z
 float g_CameraPhi = 0.0f;   // Ângulo em relação ao eixo Y
 float g_CameraDistance = 14.0f; // Distância da câmera para a origem
-glm::vec3 g_ThirdPersonCameraOffset(0.0f, 1.4f, 3.2f);
+float g_ThirdPersonCameraDistance = 3.2f;
+float g_ThirdPersonCameraHeight = 1.4f;
 float g_ThirdPersonLookAtHeight = 0.4f;
+glm::vec3 g_CameraCollisionHalfExtents(0.16f, 0.16f, 0.16f);
+float g_CameraYaw = 0.0f;
+glm::vec3 g_CameraSmoothedPosition(0.0f, 0.0f, 0.0f);
+bool g_CameraInitialized = false;
+float g_CameraYawFollowSpeed = 4.0f;
+float g_CameraPositionFollowSpeed = 8.0f;
 
 // Variáveis que controlam rotação do antebraço
 float g_ForearmAngleZ = 0.0f;
@@ -263,11 +276,64 @@ const int OBJECT_ID_PLAYER_CUBE = 4;
 
 glm::mat4 GetScenarioModelMatrix()
 {
-    return Matrix_Scale(g_ScenarioScale, g_ScenarioScale, g_ScenarioScale)
-         * Matrix_Translate(-g_ScenarioOriginalCenter.x, -g_ScenarioOriginalCenter.y, -g_ScenarioOriginalCenter.z);
+    return g_ScenarioModelMatrix;
 }
 
-int main(int argc, char* argv[])
+static std::string ResolveScene00Path(const char* relative_from_bin, const char* relative_from_root)
+{
+    std::ifstream test_bin(relative_from_bin);
+    if (test_bin.good())
+        return std::string(relative_from_bin);
+
+    std::ifstream test_root(relative_from_root);
+    if (test_root.good())
+        return std::string(relative_from_root);
+
+    return std::string(relative_from_bin);
+}
+
+static float WrapAnglePi(float angle)
+{
+    while (angle > 3.141592f) angle -= 2.0f * 3.141592f;
+    while (angle < -3.141592f) angle += 2.0f * 3.141592f;
+    return angle;
+}
+
+static float SmoothFollowAngle(float current, float target, float speed, float dt)
+{
+    const float alpha = 1.0f - std::exp(-speed * dt);
+    const float delta = WrapAnglePi(target - current);
+    return WrapAnglePi(current + delta * alpha);
+}
+
+static glm::vec3 SmoothFollowVec3(const glm::vec3& current, const glm::vec3& target, float speed, float dt)
+{
+    const float alpha = 1.0f - std::exp(-speed * dt);
+    return current + (target - current) * alpha;
+}
+
+void ComputeObjBounds(ObjModel* model, glm::vec3& bbox_min, glm::vec3& bbox_max)
+{
+    bbox_min = glm::vec3(+std::numeric_limits<float>::infinity());
+    bbox_max = glm::vec3(-std::numeric_limits<float>::infinity());
+
+    for (size_t i = 0; i < model->attrib.vertices.size() / 3; ++i)
+    {
+        const glm::vec3 p(
+            model->attrib.vertices[3 * i + 0],
+            model->attrib.vertices[3 * i + 1],
+            model->attrib.vertices[3 * i + 2]
+        );
+        bbox_min.x = std::min(bbox_min.x, p.x);
+        bbox_min.y = std::min(bbox_min.y, p.y);
+        bbox_min.z = std::min(bbox_min.z, p.z);
+        bbox_max.x = std::max(bbox_max.x, p.x);
+        bbox_max.y = std::max(bbox_max.y, p.y);
+        bbox_max.z = std::max(bbox_max.z, p.z);
+    }
+}
+
+int main()
 {
     // Inicializamos a biblioteca GLFW, utilizada para criar uma janela do
     // sistema operacional, onde poderemos renderizar com OpenGL.
@@ -344,33 +410,61 @@ int main(int argc, char* argv[])
     LoadTextureImage("../../data/red_brick_diff_1k.jpg");      // TextureImage0
     LoadTextureImage("../../data/rocky_terrain_02_diff_1k.jpg"); // TextureImage1
 
-    // Carregamos o cenário principal e construímos sua malha de renderização.
-    ObjModel scenario_model("../../models/fase1.obj");
-    ComputeNormals(&scenario_model);
-    BuildTrianglesAndAddToVirtualScene(&scenario_model);
+    const std::string scene_map_path = ResolveScene00Path(g_SceneMapPath, "assets/scenes/scene00/map.obj");
+    const std::string scene_collision_path = ResolveScene00Path(g_SceneCollisionPath, "assets/scenes/scene00/collision.obj");
 
-    for (size_t i = 0; i < scenario_model.shapes.size(); ++i)
+    // Carregamos o mapa da cena para renderização.
+    ObjModel scenario_map_model(scene_map_path.c_str());
+    ComputeNormals(&scenario_map_model);
+    glm::vec3 map_bbox_min, map_bbox_max;
+    ComputeObjBounds(&scenario_map_model, map_bbox_min, map_bbox_max);
+
+    // Sem transformação: usa coordenadas originais da scene00.
+    g_ScenarioModelMatrix = Matrix_Identity();
+
+    BuildTrianglesAndAddToVirtualScene(&scenario_map_model);
+
+    g_ScenarioObjectNames.clear();
+    for (size_t i = 0; i < scenario_map_model.shapes.size(); ++i)
     {
-        g_ScenarioObjectNames.push_back(scenario_model.shapes[i].name);
+        g_ScenarioObjectNames.push_back(scenario_map_model.shapes[i].name);
     }
+
+    // Carregamos o modelo de colisão da cena (se não existir, usa o próprio mapa).
+    ObjModel scenario_collision_model(scene_collision_path.c_str());
+    ComputeNormals(&scenario_collision_model);
+    glm::vec3 collision_bbox_min, collision_bbox_max;
+    ComputeObjBounds(&scenario_collision_model, collision_bbox_min, collision_bbox_max);
 
     // Construímos um cubo unitário para atuar como "player" no teste de colisão.
     BuildUnitCubeAndAddToVirtualScene("player_cube");
 
+    // Alinha collision.obj ao espaço do map.obj (centro + escala).
+    const glm::vec3 map_center = (map_bbox_min + map_bbox_max) * 0.5f;
+    const glm::vec3 map_size = map_bbox_max - map_bbox_min;
+    const glm::vec3 collision_center = (collision_bbox_min + collision_bbox_max) * 0.5f;
+    const glm::vec3 collision_size = collision_bbox_max - collision_bbox_min;
+
+    const float sx = (std::fabs(collision_size.x) > 1e-6f) ? (map_size.x / collision_size.x) : 1.0f;
+    const float sy = (std::fabs(collision_size.y) > 1e-6f) ? (map_size.y / collision_size.y) : 1.0f;
+    const float sz = (std::fabs(collision_size.z) > 1e-6f) ? (map_size.z / collision_size.z) : 1.0f;
+    float collision_uniform_scale = (sx + sy + sz) / 3.0f;
+    if (!std::isfinite(collision_uniform_scale) || collision_uniform_scale <= 0.0f)
+        collision_uniform_scale = 1.0f;
+
+    const glm::mat4 collision_alignment =
+        Matrix_Translate(map_center.x, map_center.y, map_center.z) *
+        Matrix_Scale(collision_uniform_scale, collision_uniform_scale, collision_uniform_scale) *
+        Matrix_Translate(-collision_center.x, -collision_center.y, -collision_center.z);
+
     // Construímos os dados usados pelo sistema de colisão.
-    BuildCollisionDataFromObjModel(&scenario_model, GetScenarioModelMatrix());
+    BuildCollisionDataFromObjModel(&scenario_collision_model, GetScenarioModelMatrix() * collision_alignment);
 
-    // Posiciona o cubo inicialmente próximo ao chão do cenário e fora de colisão.
-    g_PlayerCubePosition = glm::vec3(
-        (g_ScenarioBoundsMin.x + g_ScenarioBoundsMax.x) * 0.5f,
-        g_ScenarioBoundsMin.y + g_PlayerCubeHalfExtents.y + 0.05f,
-        (g_ScenarioBoundsMin.z + g_ScenarioBoundsMax.z) * 0.5f
-    );
-
-    for (int tries = 0; tries < 200 && CollidesWithScenario(g_PlayerCubePosition); ++tries)
-    {
-        g_PlayerCubePosition.y += 0.10f;
-    }
+    // Spawn hardcoded para testes na scene00.
+    g_PlayerCubePosition = g_HardcodedTestSpawnPosition;
+    g_PlayerYaw = 0.0f;
+    g_CameraYaw = g_PlayerYaw;
+    g_CameraInitialized = false;
 
     // Inicializamos o código para renderização de texto.
     TextRendering_Init();
@@ -392,26 +486,21 @@ int main(int argc, char* argv[])
         const float delta_time = static_cast<float>(current_frame_time - previous_frame_time);
         previous_frame_time = current_frame_time;
 
-        // Movimentação básica do cubo de teste (WASD + SPACE/SHIFT).
+        // Movimentação do personagem: W/S para frente/trás, A/D para girar.
         glm::vec3 intended_move(0.0f, 0.0f, 0.0f);
         const float move_speed = 3.5f;
+        const float turn_speed = 2.1f;
 
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) intended_move.z -= 1.0f;
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) intended_move.z += 1.0f;
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) intended_move.x -= 1.0f;
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) intended_move.x += 1.0f;
-        if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) intended_move.y += 1.0f; // sobe
-        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) intended_move.y -= 1.0f; // desce
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) g_PlayerYaw += turn_speed * delta_time;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) g_PlayerYaw -= turn_speed * delta_time;
 
-        const float intended_move_length = std::sqrt(
-            intended_move.x * intended_move.x +
-            intended_move.y * intended_move.y +
-            intended_move.z * intended_move.z
-        );
-        if (intended_move_length > 0.0f)
-        {
-            intended_move = (intended_move / intended_move_length) * move_speed * delta_time;
-        }
+        const glm::vec3 player_back(std::sin(g_PlayerYaw), 0.0f, -std::cos(g_PlayerYaw));
+        const glm::vec3 player_forward = -player_back;
+
+        float move_input = 0.0f;
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) move_input += 1.0f;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) move_input -= 1.0f;
+        intended_move = player_forward * (move_input * move_speed * delta_time);
 
         // Tentamos mover por eixo para permitir "slide" na parede.
         glm::vec3 updated_position = g_PlayerCubePosition;
@@ -430,21 +519,14 @@ int main(int argc, char* argv[])
             updated_position.z = test_position_z.z;
         }
 
-        glm::vec3 test_position_y = updated_position;
-        test_position_y.y += intended_move.y;
-        if (!CollidesWithScenario(test_position_y))
-        {
-            updated_position.y = test_position_y.y;
-        }
-
         g_PlayerCubePosition = updated_position;
         g_PlayerCubeColliding = CollidesWithScenario(g_PlayerCubePosition);
 
         glfwSetWindowTitle(
             window,
             g_PlayerCubeColliding ?
-                "INF01047 - Colisao: DETECTADA | Movimento: WASD+SPACE+SHIFT | Camera: 3a pessoa fixa" :
-                "INF01047 - Colisao: livre | Movimento: WASD+SPACE+SHIFT | Camera: 3a pessoa fixa"
+                "INF01047 - Colisao: DETECTADA | Movimento: W/S + rotacao A/D | Camera: 3a pessoa" :
+                "INF01047 - Colisao: livre | Movimento: W/S + rotacao A/D | Camera: 3a pessoa"
         );
 
         // Aqui executamos as operações de renderização
@@ -465,10 +547,40 @@ int main(int argc, char* argv[])
         // os shaders de vértice e fragmentos).
         glUseProgram(g_GpuProgramID);
 
-        // Câmera em terceira pessoa fixa: mantém a mesma orientação e apenas segue o cubo.
-        glm::vec3 camera_position_world = g_PlayerCubePosition + g_ThirdPersonCameraOffset;
-        glm::vec3 camera_lookat_world =
-            g_PlayerCubePosition + glm::vec3(0.0f, g_ThirdPersonLookAtHeight, 0.0f);
+        // Câmera third-person estilo Zelda-like:
+        // gira suavemente para alinhar com o personagem e não orbita bruscamente.
+        float camera_target_yaw = g_CameraYaw;
+        if (std::fabs(move_input) > 1e-4f)
+            camera_target_yaw = g_PlayerYaw;
+
+        g_CameraYaw = SmoothFollowAngle(g_CameraYaw, camera_target_yaw, g_CameraYawFollowSpeed, delta_time);
+        const glm::vec3 camera_back(std::sin(g_CameraYaw), 0.0f, -std::cos(g_CameraYaw));
+
+        const glm::vec3 camera_lookat_world =
+            g_PlayerCubePosition
+            + camera_back * (g_PlayerCubeHalfExtents.z + 0.18f)
+            + glm::vec3(0.0f, g_ThirdPersonLookAtHeight, 0.0f);
+
+        const glm::vec3 desired_camera_world =
+            g_PlayerCubePosition
+            + camera_back * g_ThirdPersonCameraDistance
+            + glm::vec3(0.0f, g_ThirdPersonCameraHeight, 0.0f);
+
+        if (!g_CameraInitialized)
+        {
+            g_CameraSmoothedPosition = desired_camera_world;
+            g_CameraInitialized = true;
+        }
+        g_CameraSmoothedPosition = SmoothFollowVec3(
+            g_CameraSmoothedPosition,
+            desired_camera_world,
+            g_CameraPositionFollowSpeed,
+            delta_time
+        );
+
+        const glm::vec3 camera_position_world =
+            ComputeCameraPositionWithCollision(camera_lookat_world, g_CameraSmoothedPosition);
+        g_CameraSmoothedPosition = camera_position_world;
 
         // Abaixo definimos as varáveis que efetivamente definem a câmera virtual.
         glm::vec4 camera_position_c  = glm::vec4(camera_position_world.x, camera_position_world.y, camera_position_world.z, 1.0f); // Ponto "c", centro da câmera
@@ -517,7 +629,8 @@ int main(int argc, char* argv[])
         glUniformMatrix4fv(g_view_uniform       , 1 , GL_FALSE , glm::value_ptr(view));
         glUniformMatrix4fv(g_projection_uniform , 1 , GL_FALSE , glm::value_ptr(projection));
 
-        // Desenhamos o cenário carregado de models/fase1.obj.
+        // Desenhamos o cenário carregado da pasta assets/scenes.
+        glDisable(GL_CULL_FACE);
         model = GetScenarioModelMatrix();
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
         glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
@@ -526,14 +639,28 @@ int main(int argc, char* argv[])
         {
             DrawVirtualObject(g_ScenarioObjectNames[i].c_str());
         }
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_BACK);
+        glFrontFace(GL_CCW);
 
         // Desenhamos o cubo de teste.
         model = Matrix_Translate(g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z)
+              * Matrix_Rotate_Y(g_PlayerYaw)
               * Matrix_Scale(
                     2.0f * g_PlayerCubeHalfExtents.x,
                     2.0f * g_PlayerCubeHalfExtents.y,
                     2.0f * g_PlayerCubeHalfExtents.z
                 );
+        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
+        glUniform1i(g_object_id_uniform, OBJECT_ID_PLAYER_CUBE);
+        glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
+        DrawVirtualObject("player_cube");
+
+        // Marcador das costas do personagem (referência para a câmera).
+        model = Matrix_Translate(g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z)
+              * Matrix_Rotate_Y(g_PlayerYaw)
+              * Matrix_Translate(0.0f, 0.0f, -(g_PlayerCubeHalfExtents.z + 0.18f))
+              * Matrix_Scale(0.14f, 0.14f, 0.14f);
         glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
         glUniform1i(g_object_id_uniform, OBJECT_ID_PLAYER_CUBE);
         glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
@@ -1240,10 +1367,10 @@ void BuildCollisionDataFromObjModel(ObjModel* model, glm::mat4 model_matrix)
     }
 }
 
-bool CollidesWithScenario(const glm::vec3& cube_center)
+bool CollidesWithScenarioAabb(const glm::vec3& center, const glm::vec3& half_extents)
 {
-    const glm::vec3 cube_min = cube_center - g_PlayerCubeHalfExtents;
-    const glm::vec3 cube_max = cube_center + g_PlayerCubeHalfExtents;
+    const glm::vec3 cube_min = center - half_extents;
+    const glm::vec3 cube_max = center + half_extents;
 
     for (size_t shape_index = 0; shape_index < g_ScenarioCollisionShapes.size(); ++shape_index)
     {
@@ -1256,12 +1383,35 @@ bool CollidesWithScenario(const glm::vec3& cube_center)
         // Narrow phase: testa triângulo-a-triângulo (AABB do cubo vs triângulo).
         for (size_t triangle_index = 0; triangle_index < shape.triangles.size(); ++triangle_index)
         {
-            if (TriangleIntersectsAabb(shape.triangles[triangle_index], cube_center, g_PlayerCubeHalfExtents))
+            if (TriangleIntersectsAabb(shape.triangles[triangle_index], center, half_extents))
                 return true;
         }
     }
 
     return false;
+}
+
+bool CollidesWithScenario(const glm::vec3& cube_center)
+{
+    return CollidesWithScenarioAabb(cube_center, g_PlayerCubeHalfExtents);
+}
+
+glm::vec3 ComputeCameraPositionWithCollision(const glm::vec3& lookat_position, const glm::vec3& desired_camera_position)
+{
+    // Busca a posição mais distante possível da câmera ao longo do segmento
+    // lookat -> desired, respeitando colisão com o cenário.
+    const int steps = 36;
+    const glm::vec3 ray = desired_camera_position - lookat_position;
+
+    for (int i = steps; i >= 0; --i)
+    {
+        const float t = static_cast<float>(i) / static_cast<float>(steps);
+        const glm::vec3 candidate = lookat_position + ray * t;
+        if (!CollidesWithScenarioAabb(candidate, g_CameraCollisionHalfExtents))
+            return candidate;
+    }
+
+    return lookat_position;
 }
 
 // Carrega um Vertex Shader de um arquivo GLSL. Veja definição de LoadShader() abaixo.
