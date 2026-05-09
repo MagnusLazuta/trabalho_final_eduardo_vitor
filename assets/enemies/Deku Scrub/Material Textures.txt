@@ -1,0 +1,11 @@
+Material 0:
+Textures: choronuts_00
+Meshes: nodes_11_, nodes_12_
+
+Material 1:
+Textures: choronuts_00
+Meshes: nodes_10_
+
+Material 2:
+Textures: dnk_eye01
+Meshes: nodes_13_

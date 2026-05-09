@@ -1,0 +1,107 @@
+Material 0:
+Textures: p_tex20, p_tex08a
+Meshes: nodes_30_
+
+Material 1:
+Textures: childlink_01, 
+Meshes: nodes_70_, nodes_72_, nodes_75_
+
+Material 2:
+Textures: childlink_00
+Meshes: nodes_71_, nodes_73_
+
+Material 3:
+Textures: p_tex07, p_tex07a
+Meshes: nodes_79_
+
+Material 4:
+Textures: p_tex07, p_tex07a
+Meshes: nodes_80_
+
+Material 5:
+Textures: p_tex21, p_tex21a
+Meshes: nodes_37_
+
+Material 6:
+Textures: p_tex21, p_tex21b
+Meshes: nodes_38_
+
+Material 7:
+Textures: p_tex21
+Meshes: nodes_36_
+
+Material 8:
+Textures: p_tex24
+Meshes: nodes_69_
+
+Material 9:
+Textures: p_tex17
+Meshes: nodes_33_, nodes_46_, nodes_49_, nodes_50_
+
+Material 10:
+Textures: p_tex18, p_tex18a
+Meshes: nodes_59_
+
+Material 11:
+Textures: childlink_f00
+Meshes: nodes_77_
+
+Material 12:
+Textures: childlink_f01
+Meshes: nodes_76_
+
+Material 13:
+Textures: p_tex27
+Meshes: nodes_68_
+
+Material 14:
+Textures: c_eye01
+Meshes: nodes_78_
+
+Material 15:
+Textures: c_mouth01
+Meshes: nodes_74_
+
+Material 16:
+Textures: childlink_02
+Meshes: nodes_26_, nodes_27_, nodes_29_, nodes_31_, nodes_32_, nodes_34_, nodes_35_, nodes_39_, nodes_54_, nodes_58_, nodes_60_, nodes_62_, nodes_66_
+
+Material 17:
+Textures: p_tex02, p_tex02a, p_tex02c
+Meshes: nodes_40_, nodes_43_
+
+Material 18:
+Textures: p_tex08, p_tex08b
+Meshes: nodes_57_
+
+Material 19:
+Textures: p_tex08, p_tex08a
+Meshes: nodes_56_
+
+Material 20:
+Textures: p_tex20
+Meshes: nodes_28_, nodes_41_, nodes_47_, nodes_52_
+
+Material 21:
+Textures: p_tex08
+Meshes: nodes_55_
+
+Material 22:
+Textures: p_tex04, p_tex04a
+Meshes: nodes_61_
+
+Material 23:
+Textures: p_tex19
+Meshes: nodes_63_, nodes_65_
+
+Material 24:
+Textures: p_tex22, p_tex22a
+Meshes: nodes_42_, nodes_44_, nodes_45_, nodes_48_, nodes_51_, nodes_67_
+
+Material 25:
+Textures: p_tex23
+Meshes: nodes_64_
+
+Material 26:
+Textures: p_tex25, p_tex25a
+Meshes: nodes_53_
