@@ -32,12 +32,11 @@
 #include <algorithm>
 
 // Headers das bibliotecas OpenGL
-#include <glad/glad.h>   // Criação de contexto OpenGL 3.3
-#include <GLFW/glfw3.h>  // Criação de janelas do sistema operacional
+#include <glad/glad.h>  // Criação de contexto OpenGL 3.3
+#include <GLFW/glfw3.h> // Criação de janelas do sistema operacional
 
 // Headers da biblioteca GLM: criação de matrizes e vetores.
 #include <glm/mat4x4.hpp>
-#include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -54,13 +53,13 @@
 // arquivo ".obj". Veja https://en.wikipedia.org/wiki/Wavefront_.obj_file .
 struct ObjModel
 {
-    tinyobj::attrib_t                 attrib;
-    std::vector<tinyobj::shape_t>     shapes;
-    std::vector<tinyobj::material_t>  materials;
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
 
     // Este construtor lê o modelo de um arquivo utilizando a biblioteca tinyobjloader.
     // Veja: https://github.com/syoyo/tinyobjloader
-    ObjModel(const char* filename, const char* basepath = NULL, bool triangulate = true)
+    ObjModel(const char *filename, const char *basepath = NULL, bool triangulate = true)
     {
         printf("Carregando objetos do arquivo \"%s\"...\n", filename);
 
@@ -74,7 +73,7 @@ struct ObjModel
             auto i = fullpath.find_last_of("/");
             if (i != std::string::npos)
             {
-                dirname = fullpath.substr(0, i+1);
+                dirname = fullpath.substr(0, i + 1);
                 basepath = dirname.c_str();
             }
         }
@@ -98,7 +97,7 @@ struct ObjModel
                         "Erro: Objeto sem nome dentro do arquivo '%s'.\n"
                         "Veja https://www.inf.ufrgs.br/~eslgastal/fcg-faq-etc.html#Modelos-3D-no-formato-OBJ .\n"
                         "*********************************************\n",
-                    filename);
+                        filename);
                 throw std::runtime_error("Objeto sem nome.");
             }
             printf("- Objeto '%s'\n", shapes[shape].name.c_str());
@@ -108,82 +107,81 @@ struct ObjModel
     }
 };
 
-
 // Declaração de funções utilizadas para pilha de matrizes de modelagem.
 void PushMatrix(glm::mat4 M);
-void PopMatrix(glm::mat4& M);
+void PopMatrix(glm::mat4 &M);
 
 // Declaração de várias funções utilizadas em main().  Essas estão definidas
 // logo após a definição de main() neste arquivo.
-void BuildTrianglesAndAddToVirtualScene(ObjModel*); // Constrói representação de um ObjModel como malha de triângulos para renderização
-void ComputeNormals(ObjModel* model); // Computa normais de um ObjModel, caso não existam.
-void LoadShadersFromFiles(); // Carrega os shaders de vértice e fragmento, criando um programa de GPU
-void LoadTextureImage(const char* filename); // Função que carrega imagens de textura
-void DrawVirtualObject(const char* object_name); // Desenha um objeto armazenado em g_VirtualScene
-GLuint LoadShader_Vertex(const char* filename);   // Carrega um vertex shader
-GLuint LoadShader_Fragment(const char* filename); // Carrega um fragment shader
-void LoadShader(const char* filename, GLuint shader_id); // Função utilizada pelas duas acima
-GLuint CreateGpuProgram(GLuint vertex_shader_id, GLuint fragment_shader_id); // Cria um programa de GPU
-void PrintObjModelInfo(ObjModel*); // Função para debugging
-void BuildUnitCubeAndAddToVirtualScene(const char* object_name); // Constrói cubo unitário para teste de colisão
-void BuildCollisionDataFromObjModel(ObjModel* model, glm::mat4 model_matrix); // Constrói dados de colisão para o cenário
-bool CollidesWithScenario(const glm::vec3& cube_center); // Testa colisão do cubo com o cenário
-bool CollidesWithScenarioAabb(const glm::vec3& center, const glm::vec3& half_extents); // Testa colisão de AABB genérica com o cenário
-void ComputeObjBounds(ObjModel* model, glm::vec3& bbox_min, glm::vec3& bbox_max);
-glm::vec3 ComputeCameraPositionWithCollision(const glm::vec3& lookat_position, const glm::vec3& desired_camera_position);
+void BuildTrianglesAndAddToVirtualScene(ObjModel *);                                   // Constrói representação de um ObjModel como malha de triângulos para renderização
+void ComputeNormals(ObjModel *model);                                                  // Computa normais de um ObjModel, caso não existam.
+void LoadShadersFromFiles();                                                           // Carrega os shaders de vértice e fragmento, criando um programa de GPU
+void LoadTextureImage(const char *filename);                                           // Função que carrega imagens de textura
+void DrawVirtualObject(const char *object_name);                                       // Desenha um objeto armazenado em g_VirtualScene
+GLuint LoadShader_Vertex(const char *filename);                                        // Carrega um vertex shader
+GLuint LoadShader_Fragment(const char *filename);                                      // Carrega um fragment shader
+void LoadShader(const char *filename, GLuint shader_id);                               // Função utilizada pelas duas acima
+GLuint CreateGpuProgram(GLuint vertex_shader_id, GLuint fragment_shader_id);           // Cria um programa de GPU
+void PrintObjModelInfo(ObjModel *);                                                    // Função para debugging
+void BuildUnitCubeAndAddToVirtualScene(const char *object_name);                       // Constrói cubo unitário para teste de colisão
+void BuildCollisionDataFromObjModel(ObjModel *model, glm::mat4 model_matrix);          // Constrói dados de colisão para o cenário
+bool CollidesWithScenario(const glm::vec4 &cube_center);                               // Testa colisão do cubo com o cenário
+bool CollidesWithScenarioAabb(const glm::vec4 &center, const glm::vec4 &half_extents); // Testa colisão de AABB genérica com o cenário
+void ComputeObjBounds(ObjModel *model, glm::vec4 &bbox_min, glm::vec4 &bbox_max);
+glm::vec4 ComputeCameraPositionWithCollision(const glm::vec4 &lookat_position, const glm::vec4 &desired_camera_position);
 
 // Declaração de funções auxiliares para renderizar texto dentro da janela
 // OpenGL. Estas funções estão definidas no arquivo "textrendering.cpp".
 void TextRendering_Init();
-float TextRendering_LineHeight(GLFWwindow* window);
-float TextRendering_CharWidth(GLFWwindow* window);
-void TextRendering_PrintString(GLFWwindow* window, const std::string &str, float x, float y, float scale = 1.0f);
-void TextRendering_PrintMatrix(GLFWwindow* window, glm::mat4 M, float x, float y, float scale = 1.0f);
-void TextRendering_PrintVector(GLFWwindow* window, glm::vec4 v, float x, float y, float scale = 1.0f);
-void TextRendering_PrintMatrixVectorProduct(GLFWwindow* window, glm::mat4 M, glm::vec4 v, float x, float y, float scale = 1.0f);
-void TextRendering_PrintMatrixVectorProductMoreDigits(GLFWwindow* window, glm::mat4 M, glm::vec4 v, float x, float y, float scale = 1.0f);
-void TextRendering_PrintMatrixVectorProductDivW(GLFWwindow* window, glm::mat4 M, glm::vec4 v, float x, float y, float scale = 1.0f);
+float TextRendering_LineHeight(GLFWwindow *window);
+float TextRendering_CharWidth(GLFWwindow *window);
+void TextRendering_PrintString(GLFWwindow *window, const std::string &str, float x, float y, float scale = 1.0f);
+void TextRendering_PrintMatrix(GLFWwindow *window, glm::mat4 M, float x, float y, float scale = 1.0f);
+void TextRendering_PrintVector(GLFWwindow *window, glm::vec4 v, float x, float y, float scale = 1.0f);
+void TextRendering_PrintMatrixVectorProduct(GLFWwindow *window, glm::mat4 M, glm::vec4 v, float x, float y, float scale = 1.0f);
+void TextRendering_PrintMatrixVectorProductMoreDigits(GLFWwindow *window, glm::mat4 M, glm::vec4 v, float x, float y, float scale = 1.0f);
+void TextRendering_PrintMatrixVectorProductDivW(GLFWwindow *window, glm::mat4 M, glm::vec4 v, float x, float y, float scale = 1.0f);
 
 // Funções abaixo renderizam como texto na janela OpenGL algumas matrizes e
 // outras informações do programa. Definidas após main().
-void TextRendering_ShowModelViewProjection(GLFWwindow* window, glm::mat4 projection, glm::mat4 view, glm::mat4 model, glm::vec4 p_model);
-void TextRendering_ShowEulerAngles(GLFWwindow* window);
-void TextRendering_ShowProjection(GLFWwindow* window);
-void TextRendering_ShowFramesPerSecond(GLFWwindow* window);
+void TextRendering_ShowModelViewProjection(GLFWwindow *window, glm::mat4 projection, glm::mat4 view, glm::mat4 model, glm::vec4 p_model);
+void TextRendering_ShowEulerAngles(GLFWwindow *window);
+void TextRendering_ShowProjection(GLFWwindow *window);
+void TextRendering_ShowFramesPerSecond(GLFWwindow *window);
 
 // Funções callback para comunicação com o sistema operacional e interação do
 // usuário. Veja mais comentários nas definições das mesmas, abaixo.
-void FramebufferSizeCallback(GLFWwindow* window, int width, int height);
-void ErrorCallback(int error, const char* description);
-void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode);
-void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
-void CursorPosCallback(GLFWwindow* window, double xpos, double ypos);
-void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset);
+void FramebufferSizeCallback(GLFWwindow *window, int width, int height);
+void ErrorCallback(int error, const char *description);
+void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mode);
+void MouseButtonCallback(GLFWwindow *window, int button, int action, int mods);
+void CursorPosCallback(GLFWwindow *window, double xpos, double ypos);
+void ScrollCallback(GLFWwindow *window, double xoffset, double yoffset);
 
 // Definimos uma estrutura que armazenará dados necessários para renderizar
 // cada objeto da cena virtual.
 struct SceneObject
 {
-    std::string  name;        // Nome do objeto
-    size_t       first_index; // Índice do primeiro vértice dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
-    size_t       num_indices; // Número de índices do objeto dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
-    GLenum       rendering_mode; // Modo de rasterização (GL_TRIANGLES, GL_TRIANGLE_STRIP, etc.)
-    GLuint       vertex_array_object_id; // ID do VAO onde estão armazenados os atributos do modelo
-    glm::vec3    bbox_min; // Axis-Aligned Bounding Box do objeto
-    glm::vec3    bbox_max;
+    std::string name;              // Nome do objeto
+    size_t first_index;            // Índice do primeiro vértice dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
+    size_t num_indices;            // Número de índices do objeto dentro do vetor indices[] definido em BuildTrianglesAndAddToVirtualScene()
+    GLenum rendering_mode;         // Modo de rasterização (GL_TRIANGLES, GL_TRIANGLE_STRIP, etc.)
+    GLuint vertex_array_object_id; // ID do VAO onde estão armazenados os atributos do modelo
+    glm::vec4 bbox_min;            // Axis-Aligned Bounding Box do objeto
+    glm::vec4 bbox_max;
 };
 
 struct Triangle
 {
-    glm::vec3 v0;
-    glm::vec3 v1;
-    glm::vec3 v2;
+    glm::vec4 v0;
+    glm::vec4 v1;
+    glm::vec4 v2;
 };
 
 struct CollisionShape
 {
-    glm::vec3 bbox_min;
-    glm::vec3 bbox_max;
+    glm::vec4 bbox_min;
+    glm::vec4 bbox_max;
     std::vector<Triangle> triangles;
 };
 
@@ -196,20 +194,20 @@ struct CollisionShape
 std::map<std::string, SceneObject> g_VirtualScene;
 
 // Pilha que guardará as matrizes de modelagem.
-std::stack<glm::mat4>  g_MatrixStack;
+std::stack<glm::mat4> g_MatrixStack;
 std::vector<std::string> g_ScenarioObjectNames;
 std::vector<CollisionShape> g_ScenarioCollisionShapes;
 
-glm::vec3 g_ScenarioBoundsMin = glm::vec3(+std::numeric_limits<float>::infinity());
-glm::vec3 g_ScenarioBoundsMax = glm::vec3(-std::numeric_limits<float>::infinity());
+glm::vec4 g_ScenarioBoundsMin = glm::vec4(+std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), 1.0f);
+glm::vec4 g_ScenarioBoundsMax = glm::vec4(-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), 1.0f);
 
 glm::mat4 g_ScenarioModelMatrix = Matrix_Identity();
-const char* g_SceneMapPath = "../../assets/scenes/scene00/map.obj";
-const char* g_SceneCollisionPath = "../../assets/scenes/scene00/collision.obj";
+const char *g_SceneMapPath = "../../assets/scenes/scene00/map.obj";
+const char *g_SceneCollisionPath = "../../assets/scenes/scene00/collision.obj";
 
-glm::vec3 g_PlayerCubeHalfExtents(0.30f, 0.30f, 0.30f);
-glm::vec3 g_PlayerCubePosition(0.0f, 0.0f, 0.0f);
-const glm::vec3 g_HardcodedTestSpawnPosition(2.46f, 4.80f, 1.28f);
+glm::vec4 g_PlayerCubeHalfExtents(0.30f, 0.30f, 0.30f, 0.0f);
+glm::vec4 g_PlayerCubePosition(0.0f, 0.0f, 0.0f, 1.0f);
+const glm::vec4 g_HardcodedTestSpawnPosition(2.46f, 4.80f, 1.28f, 1.0f);
 float g_PlayerYaw = 0.0f;
 bool g_PlayerCubeColliding = false;
 
@@ -224,22 +222,22 @@ float g_AngleZ = 0.0f;
 // "g_LeftMouseButtonPressed = true" se o usuário está com o botão esquerdo do mouse
 // pressionado no momento atual. Veja função MouseButtonCallback().
 bool g_LeftMouseButtonPressed = false;
-bool g_RightMouseButtonPressed = false; // Análogo para botão direito do mouse
+bool g_RightMouseButtonPressed = false;  // Análogo para botão direito do mouse
 bool g_MiddleMouseButtonPressed = false; // Análogo para botão do meio do mouse
 
 // Variáveis que definem a câmera em coordenadas esféricas, controladas pelo
 // usuário através do mouse (veja função CursorPosCallback()). A posição
 // efetiva da câmera é calculada dentro da função main(), dentro do loop de
 // renderização.
-float g_CameraTheta = 0.0f; // Ângulo no plano ZX em relação ao eixo Z
-float g_CameraPhi = 0.0f;   // Ângulo em relação ao eixo Y
+float g_CameraTheta = 0.0f;     // Ângulo no plano ZX em relação ao eixo Z
+float g_CameraPhi = 0.0f;       // Ângulo em relação ao eixo Y
 float g_CameraDistance = 14.0f; // Distância da câmera para a origem
 float g_ThirdPersonCameraDistance = 3.2f;
 float g_ThirdPersonCameraHeight = 1.4f;
 float g_ThirdPersonLookAtHeight = 0.4f;
-glm::vec3 g_CameraCollisionHalfExtents(0.16f, 0.16f, 0.16f);
+glm::vec4 g_CameraCollisionHalfExtents(0.16f, 0.16f, 0.16f, 0.0f);
 float g_CameraYaw = 0.0f;
-glm::vec3 g_CameraSmoothedPosition(0.0f, 0.0f, 0.0f);
+glm::vec4 g_CameraSmoothedPosition(0.0f, 0.0f, 0.0f, 1.0f);
 bool g_CameraInitialized = false;
 float g_CameraYawFollowSpeed = 4.0f;
 float g_CameraPositionFollowSpeed = 8.0f;
@@ -279,7 +277,7 @@ glm::mat4 GetScenarioModelMatrix()
     return g_ScenarioModelMatrix;
 }
 
-static std::string ResolveScene00Path(const char* relative_from_bin, const char* relative_from_root)
+static std::string ResolveScene00Path(const char *relative_from_bin, const char *relative_from_root)
 {
     std::ifstream test_bin(relative_from_bin);
     if (test_bin.good())
@@ -294,8 +292,10 @@ static std::string ResolveScene00Path(const char* relative_from_bin, const char*
 
 static float WrapAnglePi(float angle)
 {
-    while (angle > 3.141592f) angle -= 2.0f * 3.141592f;
-    while (angle < -3.141592f) angle += 2.0f * 3.141592f;
+    while (angle > 3.141592f)
+        angle -= 2.0f * 3.141592f;
+    while (angle < -3.141592f)
+        angle += 2.0f * 3.141592f;
     return angle;
 }
 
@@ -306,24 +306,24 @@ static float SmoothFollowAngle(float current, float target, float speed, float d
     return WrapAnglePi(current + delta * alpha);
 }
 
-static glm::vec3 SmoothFollowVec3(const glm::vec3& current, const glm::vec3& target, float speed, float dt)
+static glm::vec4 SmoothFollowVec4(const glm::vec4 &current, const glm::vec4 &target, float speed, float dt)
 {
     const float alpha = 1.0f - std::exp(-speed * dt);
     return current + (target - current) * alpha;
 }
 
-void ComputeObjBounds(ObjModel* model, glm::vec3& bbox_min, glm::vec3& bbox_max)
+void ComputeObjBounds(ObjModel *model, glm::vec4 &bbox_min, glm::vec4 &bbox_max)
 {
-    bbox_min = glm::vec3(+std::numeric_limits<float>::infinity());
-    bbox_max = glm::vec3(-std::numeric_limits<float>::infinity());
+    bbox_min = glm::vec4(+std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), 1.0f);
+    bbox_max = glm::vec4(-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), 1.0f);
 
     for (size_t i = 0; i < model->attrib.vertices.size() / 3; ++i)
     {
-        const glm::vec3 p(
+        const glm::vec4 p(
             model->attrib.vertices[3 * i + 0],
             model->attrib.vertices[3 * i + 1],
-            model->attrib.vertices[3 * i + 2]
-        );
+            model->attrib.vertices[3 * i + 2],
+            1.0f);
         bbox_min.x = std::min(bbox_min.x, p.x);
         bbox_min.y = std::min(bbox_min.y, p.y);
         bbox_min.z = std::min(bbox_min.z, p.z);
@@ -351,9 +351,9 @@ int main()
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 
-    #ifdef __APPLE__
+#ifdef __APPLE__
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-    #endif
+#endif
 
     // Pedimos para utilizar o perfil "core", isto é, utilizaremos somente as
     // funções modernas de OpenGL.
@@ -361,7 +361,7 @@ int main()
 
     // Criamos uma janela do sistema operacional, com 800 colunas e 600 linhas
     // de pixels, e com título "INF01047 ...".
-    GLFWwindow* window;
+    GLFWwindow *window;
     window = glfwCreateWindow(800, 600, "INF01047 - Seu Cartao - Seu Nome", NULL, NULL);
     if (!window)
     {
@@ -385,7 +385,7 @@ int main()
 
     // Carregamento de todas funções definidas por OpenGL 3.3, utilizando a
     // biblioteca GLAD.
-    gladLoadGLLoader((GLADloadproc) glfwGetProcAddress);
+    gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 
     // Definimos a função de callback que será chamada sempre que a janela for
     // redimensionada, por consequência alterando o tamanho do "framebuffer"
@@ -394,29 +394,32 @@ int main()
     FramebufferSizeCallback(window, 800, 600); // Forçamos a chamada do callback acima, para definir g_ScreenRatio.
 
     // Imprimimos no terminal informações sobre a GPU do sistema
-    const GLubyte *vendor      = glGetString(GL_VENDOR);
-    const GLubyte *renderer    = glGetString(GL_RENDERER);
-    const GLubyte *glversion   = glGetString(GL_VERSION);
+    const GLubyte *vendor = glGetString(GL_VENDOR);
+    const GLubyte *renderer = glGetString(GL_RENDERER);
+    const GLubyte *glversion = glGetString(GL_VERSION);
     const GLubyte *glslversion = glGetString(GL_SHADING_LANGUAGE_VERSION);
 
     printf("GPU: %s, %s, OpenGL %s, GLSL %s\n", vendor, renderer, glversion, glslversion);
 
     // Carregamos os shaders de vértices e de fragmentos que serão utilizados
     // para renderização. Veja slides 180-200 do documento Aula_03_Rendering_Pipeline_Grafico.pdf.
-    //
     LoadShadersFromFiles();
 
     // Carregamos duas imagens para serem utilizadas como textura
-    LoadTextureImage("../../data/red_brick_diff_1k.jpg");      // TextureImage0
+    LoadTextureImage("../../data/red_brick_diff_1k.jpg");        // TextureImage0
     LoadTextureImage("../../data/rocky_terrain_02_diff_1k.jpg"); // TextureImage1
 
+    // Path do mapa
     const std::string scene_map_path = ResolveScene00Path(g_SceneMapPath, "assets/scenes/scene00/map.obj");
     const std::string scene_collision_path = ResolveScene00Path(g_SceneCollisionPath, "assets/scenes/scene00/collision.obj");
+    const std::string player_model_path = ResolveScene00Path("../../assets/char/childlink_v2.obj", "assets/char/childlink_v2.obj");
 
     // Carregamos o mapa da cena para renderização.
     ObjModel scenario_map_model(scene_map_path.c_str());
     ComputeNormals(&scenario_map_model);
-    glm::vec3 map_bbox_min, map_bbox_max;
+
+    // Calcula a o AABB do mapa da cena
+    glm::vec4 map_bbox_min, map_bbox_max;
     ComputeObjBounds(&scenario_map_model, map_bbox_min, map_bbox_max);
 
     // Sem transformação: usa coordenadas originais da scene00.
@@ -433,17 +436,33 @@ int main()
     // Carregamos o modelo de colisão da cena (se não existir, usa o próprio mapa).
     ObjModel scenario_collision_model(scene_collision_path.c_str());
     ComputeNormals(&scenario_collision_model);
-    glm::vec3 collision_bbox_min, collision_bbox_max;
+    glm::vec4 collision_bbox_min, collision_bbox_max;
     ComputeObjBounds(&scenario_collision_model, collision_bbox_min, collision_bbox_max);
 
-    // Construímos um cubo unitário para atuar como "player" no teste de colisão.
-    BuildUnitCubeAndAddToVirtualScene("player_cube");
+    // Carregamos o modelo visual do personagem principal.
+    ObjModel player_model(player_model_path.c_str());
+    ComputeNormals(&player_model);
+    BuildTrianglesAndAddToVirtualScene(&player_model);
+    glm::vec4 player_model_bbox_min, player_model_bbox_max;
+    ComputeObjBounds(&player_model, player_model_bbox_min, player_model_bbox_max);
+
+    std::vector<std::string> player_model_object_names;
+    player_model_object_names.reserve(player_model.shapes.size());
+    for (size_t i = 0; i < player_model.shapes.size(); ++i)
+    {
+        player_model_object_names.push_back(player_model.shapes[i].name);
+    }
+
+    const glm::vec4 player_model_center = (player_model_bbox_min + player_model_bbox_max) * 0.5f;
+    const glm::vec4 player_model_size = player_model_bbox_max - player_model_bbox_min;
+    const float player_model_max_dimension = std::max(player_model_size.x, std::max(player_model_size.y, player_model_size.z));
+    const float player_model_scale = (player_model_max_dimension > 1e-6f) ? (1.7f / player_model_max_dimension) : 1.0f;
 
     // Alinha collision.obj ao espaço do map.obj (centro + escala).
-    const glm::vec3 map_center = (map_bbox_min + map_bbox_max) * 0.5f;
-    const glm::vec3 map_size = map_bbox_max - map_bbox_min;
-    const glm::vec3 collision_center = (collision_bbox_min + collision_bbox_max) * 0.5f;
-    const glm::vec3 collision_size = collision_bbox_max - collision_bbox_min;
+    const glm::vec4 map_center = (map_bbox_min + map_bbox_max) * 0.5f;
+    const glm::vec4 map_size = map_bbox_max - map_bbox_min;
+    const glm::vec4 collision_center = (collision_bbox_min + collision_bbox_max) * 0.5f;
+    const glm::vec4 collision_size = collision_bbox_max - collision_bbox_min;
 
     const float sx = (std::fabs(collision_size.x) > 1e-6f) ? (map_size.x / collision_size.x) : 1.0f;
     const float sy = (std::fabs(collision_size.y) > 1e-6f) ? (map_size.y / collision_size.y) : 1.0f;
@@ -479,7 +498,7 @@ int main()
 
     double previous_frame_time = glfwGetTime();
 
-    // Ficamos em um loop infinito, renderizando, até que o usuário feche a janela
+    // Ficamos em um loop infinito, renderizando, até que o usuário feche a ;janela
     while (!glfwWindowShouldClose(window))
     {
         const double current_frame_time = glfwGetTime();
@@ -487,32 +506,36 @@ int main()
         previous_frame_time = current_frame_time;
 
         // Movimentação do personagem: W/S para frente/trás, A/D para girar.
-        glm::vec3 intended_move(0.0f, 0.0f, 0.0f);
+        glm::vec4 intended_move(0.0f, 0.0f, 0.0f, 0.0f);
         const float move_speed = 3.5f;
         const float turn_speed = 2.1f;
 
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) g_PlayerYaw += turn_speed * delta_time;
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) g_PlayerYaw -= turn_speed * delta_time;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+            g_PlayerYaw += turn_speed * delta_time;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+            g_PlayerYaw -= turn_speed * delta_time;
 
-        const glm::vec3 player_back(std::sin(g_PlayerYaw), 0.0f, -std::cos(g_PlayerYaw));
-        const glm::vec3 player_forward = -player_back;
+        const glm::vec4 player_back(std::sin(g_PlayerYaw), 0.0f, -std::cos(g_PlayerYaw), 0.0f);
+        const glm::vec4 player_forward = -player_back;
 
         float move_input = 0.0f;
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) move_input += 1.0f;
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) move_input -= 1.0f;
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+            move_input += 1.0f;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+            move_input -= 1.0f;
         intended_move = player_forward * (move_input * move_speed * delta_time);
 
         // Tentamos mover por eixo para permitir "slide" na parede.
-        glm::vec3 updated_position = g_PlayerCubePosition;
+        glm::vec4 updated_position = g_PlayerCubePosition;
 
-        glm::vec3 test_position_x = updated_position;
+        glm::vec4 test_position_x = updated_position;
         test_position_x.x += intended_move.x;
         if (!CollidesWithScenario(test_position_x))
         {
             updated_position.x = test_position_x.x;
         }
 
-        glm::vec3 test_position_z = updated_position;
+        glm::vec4 test_position_z = updated_position;
         test_position_z.z += intended_move.z;
         if (!CollidesWithScenario(test_position_z))
         {
@@ -524,10 +547,7 @@ int main()
 
         glfwSetWindowTitle(
             window,
-            g_PlayerCubeColliding ?
-                "INF01047 - Colisao: DETECTADA | Movimento: W/S + rotacao A/D | Camera: 3a pessoa" :
-                "INF01047 - Colisao: livre | Movimento: W/S + rotacao A/D | Camera: 3a pessoa"
-        );
+            g_PlayerCubeColliding ? "INF01047 - Colisao: DETECTADA | Movimento: W/S + rotacao A/D | Camera: 3a pessoa" : "INF01047 - Colisao: livre | Movimento: W/S + rotacao A/D | Camera: 3a pessoa");
 
         // Aqui executamos as operações de renderização
 
@@ -554,39 +574,34 @@ int main()
             camera_target_yaw = g_PlayerYaw;
 
         g_CameraYaw = SmoothFollowAngle(g_CameraYaw, camera_target_yaw, g_CameraYawFollowSpeed, delta_time);
-        const glm::vec3 camera_back(std::sin(g_CameraYaw), 0.0f, -std::cos(g_CameraYaw));
+        const glm::vec4 camera_back(std::sin(g_CameraYaw), 0.0f, -std::cos(g_CameraYaw), 0.0f);
 
-        const glm::vec3 camera_lookat_world =
-            g_PlayerCubePosition
-            + camera_back * (g_PlayerCubeHalfExtents.z + 0.18f)
-            + glm::vec3(0.0f, g_ThirdPersonLookAtHeight, 0.0f);
+        const glm::vec4 camera_lookat_world =
+            g_PlayerCubePosition + camera_back * (g_PlayerCubeHalfExtents.z + 0.18f) + glm::vec4(0.0f, g_ThirdPersonLookAtHeight, 0.0f, 0.0f);
 
-        const glm::vec3 desired_camera_world =
-            g_PlayerCubePosition
-            + camera_back * g_ThirdPersonCameraDistance
-            + glm::vec3(0.0f, g_ThirdPersonCameraHeight, 0.0f);
+        const glm::vec4 desired_camera_world =
+            g_PlayerCubePosition + camera_back * g_ThirdPersonCameraDistance + glm::vec4(0.0f, g_ThirdPersonCameraHeight, 0.0f, 0.0f);
 
         if (!g_CameraInitialized)
         {
             g_CameraSmoothedPosition = desired_camera_world;
             g_CameraInitialized = true;
         }
-        g_CameraSmoothedPosition = SmoothFollowVec3(
+        g_CameraSmoothedPosition = SmoothFollowVec4(
             g_CameraSmoothedPosition,
             desired_camera_world,
             g_CameraPositionFollowSpeed,
-            delta_time
-        );
+            delta_time);
 
-        const glm::vec3 camera_position_world =
+        const glm::vec4 camera_position_world =
             ComputeCameraPositionWithCollision(camera_lookat_world, g_CameraSmoothedPosition);
         g_CameraSmoothedPosition = camera_position_world;
 
         // Abaixo definimos as varáveis que efetivamente definem a câmera virtual.
-        glm::vec4 camera_position_c  = glm::vec4(camera_position_world.x, camera_position_world.y, camera_position_world.z, 1.0f); // Ponto "c", centro da câmera
-        glm::vec4 camera_lookat_l    = glm::vec4(camera_lookat_world.x, camera_lookat_world.y, camera_lookat_world.z, 1.0f); // Ponto "l", para onde a câmera (look-at) estará olhando
-        glm::vec4 camera_view_vector = camera_lookat_l - camera_position_c; // Vetor "view", sentido para onde a câmera está virada
-        glm::vec4 camera_up_vector   = glm::vec4(0.0f,1.0f,0.0f,0.0f); // Vetor "up" fixado para apontar para o "céu" (eito Y global)
+        glm::vec4 camera_position_c = glm::vec4(camera_position_world.x, camera_position_world.y, camera_position_world.z, 1.0f); // Ponto "c", centro da câmera
+        glm::vec4 camera_lookat_l = glm::vec4(camera_lookat_world.x, camera_lookat_world.y, camera_lookat_world.z, 1.0f);         // Ponto "l", para onde a câmera (look-at) estará olhando
+        glm::vec4 camera_view_vector = camera_lookat_l - camera_position_c;                                                       // Vetor "view", sentido para onde a câmera está virada
+        glm::vec4 camera_up_vector = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);                                                           // Vetor "up" fixado para apontar para o "céu" (eito Y global)
 
         // Computamos a matriz "View" utilizando os parâmetros da câmera para
         // definir o sistema de coordenadas da câmera.  Veja slides 2-14, 184-190 e 236-242 do documento Aula_08_Sistemas_de_Coordenadas.pdf.
@@ -597,8 +612,8 @@ int main()
 
         // Note que, no sistema de coordenadas da câmera, os planos near e far
         // estão no sentido negativo! Veja slides 176-204 do documento Aula_09_Projecoes.pdf.
-        float nearplane = -0.1f;  // Posição do "near plane"
-        float farplane  = -80.0f; // Posição do "far plane"
+        float nearplane = -0.1f; // Posição do "near plane"
+        float farplane = -80.0f; // Posição do "far plane"
 
         if (g_UsePerspectiveProjection)
         {
@@ -614,9 +629,9 @@ int main()
             // PARA PROJEÇÃO ORTOGRÁFICA veja slides 219-224 do documento Aula_09_Projecoes.pdf.
             // Para simular um "zoom" ortográfico, computamos o valor de "t"
             // utilizando a variável g_CameraDistance.
-            float t = 1.5f*g_CameraDistance/2.5f;
+            float t = 1.5f * g_CameraDistance / 2.5f;
             float b = -t;
-            float r = t*g_ScreenRatio;
+            float r = t * g_ScreenRatio;
             float l = -r;
             projection = Matrix_Orthographic(l, r, b, t, nearplane, farplane);
         }
@@ -626,13 +641,13 @@ int main()
         // Enviamos as matrizes "view" e "projection" para a placa de vídeo
         // (GPU). Veja o arquivo "shader_vertex.glsl", onde estas são
         // efetivamente aplicadas em todos os pontos.
-        glUniformMatrix4fv(g_view_uniform       , 1 , GL_FALSE , glm::value_ptr(view));
-        glUniformMatrix4fv(g_projection_uniform , 1 , GL_FALSE , glm::value_ptr(projection));
+        glUniformMatrix4fv(g_view_uniform, 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(g_projection_uniform, 1, GL_FALSE, glm::value_ptr(projection));
 
         // Desenhamos o cenário carregado da pasta assets/scenes.
         glDisable(GL_CULL_FACE);
         model = GetScenarioModelMatrix();
-        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
+        glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
         glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
         glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
         for (size_t i = 0; i < g_ScenarioObjectNames.size(); ++i)
@@ -643,28 +658,19 @@ int main()
         glCullFace(GL_BACK);
         glFrontFace(GL_CCW);
 
-        // Desenhamos o cubo de teste.
-        model = Matrix_Translate(g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z)
-              * Matrix_Rotate_Y(g_PlayerYaw)
-              * Matrix_Scale(
-                    2.0f * g_PlayerCubeHalfExtents.x,
-                    2.0f * g_PlayerCubeHalfExtents.y,
-                    2.0f * g_PlayerCubeHalfExtents.z
-                );
-        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, OBJECT_ID_PLAYER_CUBE);
+        // Desenhamos o modelo visual do personagem principal.
+        glDisable(GL_CULL_FACE);
+        model = Matrix_Translate(g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z) * Matrix_Rotate_Y(g_PlayerYaw) * Matrix_Scale(player_model_scale, player_model_scale, player_model_scale) * Matrix_Translate(-player_model_center.x, -player_model_center.y, -player_model_center.z);
+        glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+        glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
         glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
-        DrawVirtualObject("player_cube");
-
-        // Marcador das costas do personagem (referência para a câmera).
-        model = Matrix_Translate(g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z)
-              * Matrix_Rotate_Y(g_PlayerYaw)
-              * Matrix_Translate(0.0f, 0.0f, -(g_PlayerCubeHalfExtents.z + 0.18f))
-              * Matrix_Scale(0.14f, 0.14f, 0.14f);
-        glUniformMatrix4fv(g_model_uniform, 1 , GL_FALSE , glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, OBJECT_ID_PLAYER_CUBE);
-        glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
-        DrawVirtualObject("player_cube");
+        for (size_t i = 0; i < player_model_object_names.size(); ++i)
+        {
+            DrawVirtualObject(player_model_object_names[i].c_str());
+        }
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_BACK);
+        glFrontFace(GL_CCW);
 
         // Imprimimos na tela os ângulos de Euler que controlam a rotação do
         // terceiro cubo.
@@ -700,7 +706,7 @@ int main()
 }
 
 // Função que carrega uma imagem para ser utilizada como textura
-void LoadTextureImage(const char* filename)
+void LoadTextureImage(const char *filename)
 {
     printf("Carregando imagem \"%s\"... ", filename);
 
@@ -711,7 +717,7 @@ void LoadTextureImage(const char* filename)
     int channels;
     unsigned char *data = stbi_load(filename, &width, &height, &channels, 3);
 
-    if ( data == NULL )
+    if (data == NULL)
     {
         fprintf(stderr, "ERROR: Cannot open image file \"%s\".\n", filename);
         std::exit(EXIT_FAILURE);
@@ -753,7 +759,7 @@ void LoadTextureImage(const char* filename)
 
 // Função que desenha um objeto armazenado em g_VirtualScene. Veja definição
 // dos objetos na função BuildTrianglesAndAddToVirtualScene().
-void DrawVirtualObject(const char* object_name)
+void DrawVirtualObject(const char *object_name)
 {
     // "Ligamos" o VAO. Informamos que queremos utilizar os atributos de
     // vértices apontados pelo VAO criado pela função BuildTrianglesAndAddToVirtualScene(). Veja
@@ -762,8 +768,8 @@ void DrawVirtualObject(const char* object_name)
 
     // Setamos as variáveis "bbox_min" e "bbox_max" do fragment shader
     // com os parâmetros da axis-aligned bounding box (AABB) do modelo.
-    glm::vec3 bbox_min = g_VirtualScene[object_name].bbox_min;
-    glm::vec3 bbox_max = g_VirtualScene[object_name].bbox_max;
+    glm::vec4 bbox_min = g_VirtualScene[object_name].bbox_min;
+    glm::vec4 bbox_max = g_VirtualScene[object_name].bbox_max;
     glUniform4f(g_bbox_min_uniform, bbox_min.x, bbox_min.y, bbox_min.z, 1.0f);
     glUniform4f(g_bbox_max_uniform, bbox_max.x, bbox_max.y, bbox_max.z, 1.0f);
 
@@ -776,8 +782,7 @@ void DrawVirtualObject(const char* object_name)
         g_VirtualScene[object_name].rendering_mode,
         g_VirtualScene[object_name].num_indices,
         GL_UNSIGNED_INT,
-        (void*)(g_VirtualScene[object_name].first_index * sizeof(GLuint))
-    );
+        (void *)(g_VirtualScene[object_name].first_index * sizeof(GLuint)));
 
     // "Desligamos" o VAO, evitando assim que operações posteriores venham a
     // alterar o mesmo. Isso evita bugs.
@@ -811,7 +816,7 @@ void LoadShadersFromFiles()
     GLuint fragment_shader_id = LoadShader_Fragment("../../src/shader_fragment.glsl");
 
     // Deletamos o programa de GPU anterior, caso ele exista.
-    if ( g_GpuProgramID != 0 )
+    if (g_GpuProgramID != 0)
         glDeleteProgram(g_GpuProgramID);
 
     // Criamos um programa de GPU utilizando os shaders carregados acima.
@@ -820,12 +825,12 @@ void LoadShadersFromFiles()
     // Buscamos o endereço das variáveis definidas dentro do Vertex Shader.
     // Utilizaremos estas variáveis para enviar dados para a placa de vídeo
     // (GPU)! Veja arquivo "shader_vertex.glsl" e "shader_fragment.glsl".
-    g_model_uniform      = glGetUniformLocation(g_GpuProgramID, "model"); // Variável da matriz "model"
-    g_view_uniform       = glGetUniformLocation(g_GpuProgramID, "view"); // Variável da matriz "view" em shader_vertex.glsl
+    g_model_uniform = glGetUniformLocation(g_GpuProgramID, "model");           // Variável da matriz "model"
+    g_view_uniform = glGetUniformLocation(g_GpuProgramID, "view");             // Variável da matriz "view" em shader_vertex.glsl
     g_projection_uniform = glGetUniformLocation(g_GpuProgramID, "projection"); // Variável da matriz "projection" em shader_vertex.glsl
-    g_object_id_uniform  = glGetUniformLocation(g_GpuProgramID, "object_id"); // Variável "object_id" em shader_fragment.glsl
-    g_bbox_min_uniform   = glGetUniformLocation(g_GpuProgramID, "bbox_min");
-    g_bbox_max_uniform   = glGetUniformLocation(g_GpuProgramID, "bbox_max");
+    g_object_id_uniform = glGetUniformLocation(g_GpuProgramID, "object_id");   // Variável "object_id" em shader_fragment.glsl
+    g_bbox_min_uniform = glGetUniformLocation(g_GpuProgramID, "bbox_min");
+    g_bbox_max_uniform = glGetUniformLocation(g_GpuProgramID, "bbox_max");
     g_cube_colliding_uniform = glGetUniformLocation(g_GpuProgramID, "cube_colliding");
 
     // Variáveis em "shader_fragment.glsl" para acesso das imagens de textura
@@ -843,9 +848,9 @@ void PushMatrix(glm::mat4 M)
 }
 
 // Função que remove a matriz atualmente no topo da pilha e armazena a mesma na variável M
-void PopMatrix(glm::mat4& M)
+void PopMatrix(glm::mat4 &M)
 {
-    if ( g_MatrixStack.empty() )
+    if (g_MatrixStack.empty())
     {
         M = Matrix_Identity();
     }
@@ -858,9 +863,9 @@ void PopMatrix(glm::mat4& M)
 
 // Função que computa as normais de um ObjModel, caso elas não tenham sido
 // especificadas dentro do arquivo ".obj"
-void ComputeNormals(ObjModel* model)
+void ComputeNormals(ObjModel *model)
 {
-    if ( !model->attrib.normals.empty() )
+    if (!model->attrib.normals.empty())
         return;
 
     // Primeiro computamos as normais para todos os TRIÂNGULOS.
@@ -886,13 +891,13 @@ void ComputeNormals(ObjModel* model)
     }
 
     size_t num_vertices = model->attrib.vertices.size() / 3;
-    model->attrib.normals.reserve( 3*num_vertices );
+    model->attrib.normals.reserve(3 * num_vertices);
 
     // Processamos um smoothing group por vez
-    for (const unsigned int & sgroup : sgroup_ids)
+    for (const unsigned int &sgroup : sgroup_ids)
     {
         std::vector<int> num_triangles_per_vertex(num_vertices, 0);
-        std::vector<glm::vec4> vertex_normals(num_vertices, glm::vec4(0.0f,0.0f,0.0f,0.0f));
+        std::vector<glm::vec4> vertex_normals(num_vertices, glm::vec4(0.0f, 0.0f, 0.0f, 0.0f));
 
         // Acumulamos as normais dos vértices de todos triângulos deste smoothing group
         for (size_t shape = 0; shape < model->shapes.size(); ++shape)
@@ -906,25 +911,25 @@ void ComputeNormals(ObjModel* model)
                 if (sgroup_tri != sgroup)
                     continue;
 
-                glm::vec4  vertices[3];
+                glm::vec4 vertices[3];
                 for (size_t vertex = 0; vertex < 3; ++vertex)
                 {
-                    tinyobj::index_t idx = model->shapes[shape].mesh.indices[3*triangle + vertex];
-                    const float vx = model->attrib.vertices[3*idx.vertex_index + 0];
-                    const float vy = model->attrib.vertices[3*idx.vertex_index + 1];
-                    const float vz = model->attrib.vertices[3*idx.vertex_index + 2];
-                    vertices[vertex] = glm::vec4(vx,vy,vz,1.0);
+                    tinyobj::index_t idx = model->shapes[shape].mesh.indices[3 * triangle + vertex];
+                    const float vx = model->attrib.vertices[3 * idx.vertex_index + 0];
+                    const float vy = model->attrib.vertices[3 * idx.vertex_index + 1];
+                    const float vz = model->attrib.vertices[3 * idx.vertex_index + 2];
+                    vertices[vertex] = glm::vec4(vx, vy, vz, 1.0);
                 }
 
-                const glm::vec4  a = vertices[0];
-                const glm::vec4  b = vertices[1];
-                const glm::vec4  c = vertices[2];
+                const glm::vec4 a = vertices[0];
+                const glm::vec4 b = vertices[1];
+                const glm::vec4 c = vertices[2];
 
-                const glm::vec4  n = crossproduct(b-a,c-a);
+                const glm::vec4 n = crossproduct(b - a, c - a);
 
                 for (size_t vertex = 0; vertex < 3; ++vertex)
                 {
-                    tinyobj::index_t idx = model->shapes[shape].mesh.indices[3*triangle + vertex];
+                    tinyobj::index_t idx = model->shapes[shape].mesh.indices[3 * triangle + vertex];
                     num_triangles_per_vertex[idx.vertex_index] += 1;
                     vertex_normals[idx.vertex_index] += n;
                 }
@@ -942,9 +947,9 @@ void ComputeNormals(ObjModel* model)
             glm::vec4 n = vertex_normals[vertex_index] / (float)num_triangles_per_vertex[vertex_index];
             n /= norm(n);
 
-            model->attrib.normals.push_back( n.x );
-            model->attrib.normals.push_back( n.y );
-            model->attrib.normals.push_back( n.z );
+            model->attrib.normals.push_back(n.x);
+            model->attrib.normals.push_back(n.y);
+            model->attrib.normals.push_back(n.z);
 
             size_t normal_index = (model->attrib.normals.size() / 3) - 1;
             normal_indices[vertex_index] = normal_index;
@@ -964,27 +969,26 @@ void ComputeNormals(ObjModel* model)
 
                 for (size_t vertex = 0; vertex < 3; ++vertex)
                 {
-                    tinyobj::index_t idx = model->shapes[shape].mesh.indices[3*triangle + vertex];
-                    model->shapes[shape].mesh.indices[3*triangle + vertex].normal_index =
-                        normal_indices[ idx.vertex_index ];
+                    tinyobj::index_t idx = model->shapes[shape].mesh.indices[3 * triangle + vertex];
+                    model->shapes[shape].mesh.indices[3 * triangle + vertex].normal_index =
+                        normal_indices[idx.vertex_index];
                 }
             }
         }
-
     }
 }
 
 // Constrói triângulos para futura renderização a partir de um ObjModel.
-void BuildTrianglesAndAddToVirtualScene(ObjModel* model)
+void BuildTrianglesAndAddToVirtualScene(ObjModel *model)
 {
     GLuint vertex_array_object_id;
     glGenVertexArrays(1, &vertex_array_object_id);
     glBindVertexArray(vertex_array_object_id);
 
     std::vector<GLuint> indices;
-    std::vector<float>  model_coefficients;
-    std::vector<float>  normal_coefficients;
-    std::vector<float>  texture_coefficients;
+    std::vector<float> model_coefficients;
+    std::vector<float> normal_coefficients;
+    std::vector<float> texture_coefficients;
 
     for (size_t shape = 0; shape < model->shapes.size(); ++shape)
     {
@@ -994,8 +998,8 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel* model)
         const float minval = std::numeric_limits<float>::min();
         const float maxval = std::numeric_limits<float>::max();
 
-        glm::vec3 bbox_min = glm::vec3(maxval,maxval,maxval);
-        glm::vec3 bbox_max = glm::vec3(minval,minval,minval);
+        glm::vec4 bbox_min = glm::vec4(maxval, maxval, maxval, 1.0f);
+        glm::vec4 bbox_max = glm::vec4(minval, minval, minval, 1.0f);
 
         for (size_t triangle = 0; triangle < num_triangles; ++triangle)
         {
@@ -1003,18 +1007,18 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel* model)
 
             for (size_t vertex = 0; vertex < 3; ++vertex)
             {
-                tinyobj::index_t idx = model->shapes[shape].mesh.indices[3*triangle + vertex];
+                tinyobj::index_t idx = model->shapes[shape].mesh.indices[3 * triangle + vertex];
 
-                indices.push_back(first_index + 3*triangle + vertex);
+                indices.push_back(first_index + 3 * triangle + vertex);
 
-                const float vx = model->attrib.vertices[3*idx.vertex_index + 0];
-                const float vy = model->attrib.vertices[3*idx.vertex_index + 1];
-                const float vz = model->attrib.vertices[3*idx.vertex_index + 2];
-                //printf("tri %d vert %d = (%.2f, %.2f, %.2f)\n", (int)triangle, (int)vertex, vx, vy, vz);
-                model_coefficients.push_back( vx ); // X
-                model_coefficients.push_back( vy ); // Y
-                model_coefficients.push_back( vz ); // Z
-                model_coefficients.push_back( 1.0f ); // W
+                const float vx = model->attrib.vertices[3 * idx.vertex_index + 0];
+                const float vy = model->attrib.vertices[3 * idx.vertex_index + 1];
+                const float vz = model->attrib.vertices[3 * idx.vertex_index + 2];
+                // printf("tri %d vert %d = (%.2f, %.2f, %.2f)\n", (int)triangle, (int)vertex, vx, vy, vz);
+                model_coefficients.push_back(vx);   // X
+                model_coefficients.push_back(vy);   // Y
+                model_coefficients.push_back(vz);   // Z
+                model_coefficients.push_back(1.0f); // W
 
                 bbox_min.x = std::min(bbox_min.x, vx);
                 bbox_min.y = std::min(bbox_min.y, vy);
@@ -1028,23 +1032,23 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel* model)
                 // existem normais e coordenadas de textura no ObjModel é
                 // comparando se o índice retornado é -1. Fazemos isso abaixo.
 
-                if ( idx.normal_index != -1 )
+                if (idx.normal_index != -1)
                 {
-                    const float nx = model->attrib.normals[3*idx.normal_index + 0];
-                    const float ny = model->attrib.normals[3*idx.normal_index + 1];
-                    const float nz = model->attrib.normals[3*idx.normal_index + 2];
-                    normal_coefficients.push_back( nx ); // X
-                    normal_coefficients.push_back( ny ); // Y
-                    normal_coefficients.push_back( nz ); // Z
-                    normal_coefficients.push_back( 0.0f ); // W
+                    const float nx = model->attrib.normals[3 * idx.normal_index + 0];
+                    const float ny = model->attrib.normals[3 * idx.normal_index + 1];
+                    const float nz = model->attrib.normals[3 * idx.normal_index + 2];
+                    normal_coefficients.push_back(nx);   // X
+                    normal_coefficients.push_back(ny);   // Y
+                    normal_coefficients.push_back(nz);   // Z
+                    normal_coefficients.push_back(0.0f); // W
                 }
 
-                if ( idx.texcoord_index != -1 )
+                if (idx.texcoord_index != -1)
                 {
-                    const float u = model->attrib.texcoords[2*idx.texcoord_index + 0];
-                    const float v = model->attrib.texcoords[2*idx.texcoord_index + 1];
-                    texture_coefficients.push_back( u );
-                    texture_coefficients.push_back( v );
+                    const float u = model->attrib.texcoords[2 * idx.texcoord_index + 0];
+                    const float v = model->attrib.texcoords[2 * idx.texcoord_index + 1];
+                    texture_coefficients.push_back(u);
+                    texture_coefficients.push_back(v);
                 }
             }
         }
@@ -1052,10 +1056,10 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel* model)
         size_t last_index = indices.size() - 1;
 
         SceneObject theobject;
-        theobject.name           = model->shapes[shape].name;
-        theobject.first_index    = first_index; // Primeiro índice
-        theobject.num_indices    = last_index - first_index + 1; // Número de indices
-        theobject.rendering_mode = GL_TRIANGLES;       // Índices correspondem ao tipo de rasterização GL_TRIANGLES.
+        theobject.name = model->shapes[shape].name;
+        theobject.first_index = first_index;                  // Primeiro índice
+        theobject.num_indices = last_index - first_index + 1; // Número de indices
+        theobject.rendering_mode = GL_TRIANGLES;              // Índices correspondem ao tipo de rasterização GL_TRIANGLES.
         theobject.vertex_array_object_id = vertex_array_object_id;
 
         theobject.bbox_min = bbox_min;
@@ -1069,34 +1073,34 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel* model)
     glBindBuffer(GL_ARRAY_BUFFER, VBO_model_coefficients_id);
     glBufferData(GL_ARRAY_BUFFER, model_coefficients.size() * sizeof(float), NULL, GL_STATIC_DRAW);
     glBufferSubData(GL_ARRAY_BUFFER, 0, model_coefficients.size() * sizeof(float), model_coefficients.data());
-    GLuint location = 0; // "(location = 0)" em "shader_vertex.glsl"
-    GLint  number_of_dimensions = 4; // vec4 em "shader_vertex.glsl"
+    GLuint location = 0;            // "(location = 0)" em "shader_vertex.glsl"
+    GLint number_of_dimensions = 4; // vec4 em "shader_vertex.glsl"
     glVertexAttribPointer(location, number_of_dimensions, GL_FLOAT, GL_FALSE, 0, 0);
     glEnableVertexAttribArray(location);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    if ( !normal_coefficients.empty() )
+    if (!normal_coefficients.empty())
     {
         GLuint VBO_normal_coefficients_id;
         glGenBuffers(1, &VBO_normal_coefficients_id);
         glBindBuffer(GL_ARRAY_BUFFER, VBO_normal_coefficients_id);
         glBufferData(GL_ARRAY_BUFFER, normal_coefficients.size() * sizeof(float), NULL, GL_STATIC_DRAW);
         glBufferSubData(GL_ARRAY_BUFFER, 0, normal_coefficients.size() * sizeof(float), normal_coefficients.data());
-        location = 1; // "(location = 1)" em "shader_vertex.glsl"
+        location = 1;             // "(location = 1)" em "shader_vertex.glsl"
         number_of_dimensions = 4; // vec4 em "shader_vertex.glsl"
         glVertexAttribPointer(location, number_of_dimensions, GL_FLOAT, GL_FALSE, 0, 0);
         glEnableVertexAttribArray(location);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
 
-    if ( !texture_coefficients.empty() )
+    if (!texture_coefficients.empty())
     {
         GLuint VBO_texture_coefficients_id;
         glGenBuffers(1, &VBO_texture_coefficients_id);
         glBindBuffer(GL_ARRAY_BUFFER, VBO_texture_coefficients_id);
         glBufferData(GL_ARRAY_BUFFER, texture_coefficients.size() * sizeof(float), NULL, GL_STATIC_DRAW);
         glBufferSubData(GL_ARRAY_BUFFER, 0, texture_coefficients.size() * sizeof(float), texture_coefficients.data());
-        location = 2; // "(location = 1)" em "shader_vertex.glsl"
+        location = 2;             // "(location = 1)" em "shader_vertex.glsl"
         number_of_dimensions = 2; // vec2 em "shader_vertex.glsl"
         glVertexAttribPointer(location, number_of_dimensions, GL_FLOAT, GL_FALSE, 0, 0);
         glEnableVertexAttribArray(location);
@@ -1118,7 +1122,7 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel* model)
     glBindVertexArray(0);
 }
 
-void BuildUnitCubeAndAddToVirtualScene(const char* object_name)
+void BuildUnitCubeAndAddToVirtualScene(const char *object_name)
 {
     GLuint vertex_array_object_id;
     glGenVertexArrays(1, &vertex_array_object_id);
@@ -1126,33 +1130,31 @@ void BuildUnitCubeAndAddToVirtualScene(const char* object_name)
 
     const float vertices[] = {
         // Frente (+Z)
-        -0.5f, -0.5f, +0.5f,  +0.5f, -0.5f, +0.5f,  +0.5f, +0.5f, +0.5f,
-        -0.5f, -0.5f, +0.5f,  +0.5f, +0.5f, +0.5f,  -0.5f, +0.5f, +0.5f,
+        -0.5f, -0.5f, +0.5f, +0.5f, -0.5f, +0.5f, +0.5f, +0.5f, +0.5f,
+        -0.5f, -0.5f, +0.5f, +0.5f, +0.5f, +0.5f, -0.5f, +0.5f, +0.5f,
         // Trás (-Z)
-        +0.5f, -0.5f, -0.5f,  -0.5f, -0.5f, -0.5f,  -0.5f, +0.5f, -0.5f,
-        +0.5f, -0.5f, -0.5f,  -0.5f, +0.5f, -0.5f,  +0.5f, +0.5f, -0.5f,
+        +0.5f, -0.5f, -0.5f, -0.5f, -0.5f, -0.5f, -0.5f, +0.5f, -0.5f,
+        +0.5f, -0.5f, -0.5f, -0.5f, +0.5f, -0.5f, +0.5f, +0.5f, -0.5f,
         // Esquerda (-X)
-        -0.5f, -0.5f, -0.5f,  -0.5f, -0.5f, +0.5f,  -0.5f, +0.5f, +0.5f,
-        -0.5f, -0.5f, -0.5f,  -0.5f, +0.5f, +0.5f,  -0.5f, +0.5f, -0.5f,
+        -0.5f, -0.5f, -0.5f, -0.5f, -0.5f, +0.5f, -0.5f, +0.5f, +0.5f,
+        -0.5f, -0.5f, -0.5f, -0.5f, +0.5f, +0.5f, -0.5f, +0.5f, -0.5f,
         // Direita (+X)
-        +0.5f, -0.5f, +0.5f,  +0.5f, -0.5f, -0.5f,  +0.5f, +0.5f, -0.5f,
-        +0.5f, -0.5f, +0.5f,  +0.5f, +0.5f, -0.5f,  +0.5f, +0.5f, +0.5f,
+        +0.5f, -0.5f, +0.5f, +0.5f, -0.5f, -0.5f, +0.5f, +0.5f, -0.5f,
+        +0.5f, -0.5f, +0.5f, +0.5f, +0.5f, -0.5f, +0.5f, +0.5f, +0.5f,
         // Topo (+Y)
-        -0.5f, +0.5f, +0.5f,  +0.5f, +0.5f, +0.5f,  +0.5f, +0.5f, -0.5f,
-        -0.5f, +0.5f, +0.5f,  +0.5f, +0.5f, -0.5f,  -0.5f, +0.5f, -0.5f,
+        -0.5f, +0.5f, +0.5f, +0.5f, +0.5f, +0.5f, +0.5f, +0.5f, -0.5f,
+        -0.5f, +0.5f, +0.5f, +0.5f, +0.5f, -0.5f, -0.5f, +0.5f, -0.5f,
         // Base (-Y)
-        -0.5f, -0.5f, -0.5f,  +0.5f, -0.5f, -0.5f,  +0.5f, -0.5f, +0.5f,
-        -0.5f, -0.5f, -0.5f,  +0.5f, -0.5f, +0.5f,  -0.5f, -0.5f, +0.5f
-    };
+        -0.5f, -0.5f, -0.5f, +0.5f, -0.5f, -0.5f, +0.5f, -0.5f, +0.5f,
+        -0.5f, -0.5f, -0.5f, +0.5f, -0.5f, +0.5f, -0.5f, -0.5f, +0.5f};
 
     const float normals[] = {
-         0,  0, +1,   0,  0, +1,   0,  0, +1,   0,  0, +1,   0,  0, +1,   0,  0, +1,
-         0,  0, -1,   0,  0, -1,   0,  0, -1,   0,  0, -1,   0,  0, -1,   0,  0, -1,
-        -1,  0,  0,  -1,  0,  0,  -1,  0,  0,  -1,  0,  0,  -1,  0,  0,  -1,  0,  0,
-        +1,  0,  0,  +1,  0,  0,  +1,  0,  0,  +1,  0,  0,  +1,  0,  0,  +1,  0,  0,
-         0, +1,  0,   0, +1,  0,   0, +1,  0,   0, +1,  0,   0, +1,  0,   0, +1,  0,
-         0, -1,  0,   0, -1,  0,   0, -1,  0,   0, -1,  0,   0, -1,  0,   0, -1,  0
-    };
+        0, 0, +1, 0, 0, +1, 0, 0, +1, 0, 0, +1, 0, 0, +1, 0, 0, +1,
+        0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1,
+        -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0,
+        +1, 0, 0, +1, 0, 0, +1, 0, 0, +1, 0, 0, +1, 0, 0, +1, 0, 0,
+        0, +1, 0, 0, +1, 0, 0, +1, 0, 0, +1, 0, 0, +1, 0, 0, +1, 0,
+        0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0};
 
     std::vector<float> model_coefficients;
     std::vector<float> normal_coefficients;
@@ -1214,8 +1216,8 @@ void BuildUnitCubeAndAddToVirtualScene(const char* object_name)
     cube.num_indices = indices.size();
     cube.rendering_mode = GL_TRIANGLES;
     cube.vertex_array_object_id = vertex_array_object_id;
-    cube.bbox_min = glm::vec3(-0.5f, -0.5f, -0.5f);
-    cube.bbox_max = glm::vec3(+0.5f, +0.5f, +0.5f);
+    cube.bbox_min = glm::vec4(-0.5f, -0.5f, -0.5f, 1.0f);
+    cube.bbox_max = glm::vec4(+0.5f, +0.5f, +0.5f, 1.0f);
     g_VirtualScene[object_name] = cube;
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -1223,9 +1225,8 @@ void BuildUnitCubeAndAddToVirtualScene(const char* object_name)
 }
 
 static bool AabbIntersects(
-    const glm::vec3& min_a, const glm::vec3& max_a,
-    const glm::vec3& min_b, const glm::vec3& max_b
-)
+    const glm::vec4 &min_a, const glm::vec4 &max_a,
+    const glm::vec4 &min_b, const glm::vec4 &max_b)
 {
     return min_a.x <= max_b.x && max_a.x >= min_b.x &&
            min_a.y <= max_b.y && max_a.y >= min_b.y &&
@@ -1233,20 +1234,19 @@ static bool AabbIntersects(
 }
 
 static bool OverlapOnAxis(
-    const glm::vec3& v0,
-    const glm::vec3& v1,
-    const glm::vec3& v2,
-    const glm::vec3& axis,
-    const glm::vec3& half_extents
-)
+    const glm::vec4 &v0,
+    const glm::vec4 &v1,
+    const glm::vec4 &v2,
+    const glm::vec4 &axis,
+    const glm::vec4 &half_extents)
 {
     const float eps = 1e-7f;
-    if (dotproduct(glm::vec4(axis, 0.0f), glm::vec4(axis, 0.0f)) < eps)
+    if (dotproduct(axis, axis) < eps)
         return true;
 
-    const float p0 = dotproduct(glm::vec4(v0, 0.0f), glm::vec4(axis, 0.0f));
-    const float p1 = dotproduct(glm::vec4(v1, 0.0f), glm::vec4(axis, 0.0f));
-    const float p2 = dotproduct(glm::vec4(v2, 0.0f), glm::vec4(axis, 0.0f));
+    const float p0 = dotproduct(v0, axis);
+    const float p1 = dotproduct(v1, axis);
+    const float p2 = dotproduct(v2, axis);
     const float tri_min = std::min(p0, std::min(p1, p2));
     const float tri_max = std::max(p0, std::max(p1, p2));
 
@@ -1259,31 +1259,33 @@ static bool OverlapOnAxis(
 }
 
 static bool TriangleIntersectsAabb(
-    const Triangle& triangle,
-    const glm::vec3& box_center,
-    const glm::vec3& box_half_extents
-)
+    const Triangle &triangle,
+    const glm::vec4 &box_center,
+    const glm::vec4 &box_half_extents)
 {
     // Colocamos tudo no referencial local da AABB (caixa centrada na origem).
-    const glm::vec3 v0 = triangle.v0 - box_center;
-    const glm::vec3 v1 = triangle.v1 - box_center;
-    const glm::vec3 v2 = triangle.v2 - box_center;
+    const glm::vec4 v0 = triangle.v0 - box_center;
+    const glm::vec4 v1 = triangle.v1 - box_center;
+    const glm::vec4 v2 = triangle.v2 - box_center;
 
-    const glm::vec3 e0 = v1 - v0;
-    const glm::vec3 e1 = v2 - v1;
-    const glm::vec3 e2 = v0 - v2;
-    const glm::vec3 edges[3] = { e0, e1, e2 };
-    const glm::vec3 axis_basis[3] =
-    {
-        glm::vec3(1.0f, 0.0f, 0.0f),
-        glm::vec3(0.0f, 1.0f, 0.0f),
-        glm::vec3(0.0f, 0.0f, 1.0f),
-    };
+    const glm::vec4 e0 = v1 - v0;
+    const glm::vec4 e1 = v2 - v1;
+    const glm::vec4 e2 = v0 - v2;
+    const glm::vec4 edges[3] = {e0, e1, e2};
+    const glm::vec4 axis_basis[3] =
+        {
+            glm::vec4(1.0f, 0.0f, 0.0f, 0.0f),
+            glm::vec4(0.0f, 1.0f, 0.0f, 0.0f),
+            glm::vec4(0.0f, 0.0f, 1.0f, 0.0f),
+        };
 
     // SAT: 3 eixos da AABB
-    if (std::max(v0.x, std::max(v1.x, v2.x)) < -box_half_extents.x || std::min(v0.x, std::min(v1.x, v2.x)) > box_half_extents.x) return false;
-    if (std::max(v0.y, std::max(v1.y, v2.y)) < -box_half_extents.y || std::min(v0.y, std::min(v1.y, v2.y)) > box_half_extents.y) return false;
-    if (std::max(v0.z, std::max(v1.z, v2.z)) < -box_half_extents.z || std::min(v0.z, std::min(v1.z, v2.z)) > box_half_extents.z) return false;
+    if (std::max(v0.x, std::max(v1.x, v2.x)) < -box_half_extents.x || std::min(v0.x, std::min(v1.x, v2.x)) > box_half_extents.x)
+        return false;
+    if (std::max(v0.y, std::max(v1.y, v2.y)) < -box_half_extents.y || std::min(v0.y, std::min(v1.y, v2.y)) > box_half_extents.y)
+        return false;
+    if (std::max(v0.z, std::max(v1.z, v2.z)) < -box_half_extents.z || std::min(v0.z, std::min(v1.z, v2.z)) > box_half_extents.z)
+        return false;
 
     // SAT: 9 eixos cruzamento aresta-triângulo X eixo-caixa
     for (int edge_index = 0; edge_index < 3; ++edge_index)
@@ -1291,35 +1293,34 @@ static bool TriangleIntersectsAabb(
         for (int axis_index = 0; axis_index < 3; ++axis_index)
         {
             const glm::vec4 axis4 = crossproduct(
-                glm::vec4(edges[edge_index], 0.0f),
-                glm::vec4(axis_basis[axis_index], 0.0f)
-            );
-            const glm::vec3 axis(axis4.x, axis4.y, axis4.z);
+                edges[edge_index],
+                axis_basis[axis_index]);
+            const glm::vec4 axis(axis4.x, axis4.y, axis4.z, 0.0f);
             if (!OverlapOnAxis(v0, v1, v2, axis, box_half_extents))
                 return false;
         }
     }
 
     // SAT: eixo normal do triângulo
-    const glm::vec4 tri_normal4 = crossproduct(glm::vec4(e0, 0.0f), glm::vec4(e1, 0.0f));
-    const glm::vec3 tri_normal(tri_normal4.x, tri_normal4.y, tri_normal4.z);
+    const glm::vec4 tri_normal4 = crossproduct(e0, e1);
+    const glm::vec4 tri_normal(tri_normal4.x, tri_normal4.y, tri_normal4.z, 0.0f);
     if (!OverlapOnAxis(v0, v1, v2, tri_normal, box_half_extents))
         return false;
 
     return true;
 }
 
-void BuildCollisionDataFromObjModel(ObjModel* model, glm::mat4 model_matrix)
+void BuildCollisionDataFromObjModel(ObjModel *model, glm::mat4 model_matrix)
 {
     g_ScenarioCollisionShapes.clear();
-    g_ScenarioBoundsMin = glm::vec3(+std::numeric_limits<float>::infinity());
-    g_ScenarioBoundsMax = glm::vec3(-std::numeric_limits<float>::infinity());
+    g_ScenarioBoundsMin = glm::vec4(+std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), 1.0f);
+    g_ScenarioBoundsMax = glm::vec4(-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), 1.0f);
 
     for (size_t shape = 0; shape < model->shapes.size(); ++shape)
     {
         CollisionShape shape_collision;
-        shape_collision.bbox_min = glm::vec3(+std::numeric_limits<float>::infinity());
-        shape_collision.bbox_max = glm::vec3(-std::numeric_limits<float>::infinity());
+        shape_collision.bbox_min = glm::vec4(+std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), 1.0f);
+        shape_collision.bbox_max = glm::vec4(-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), 1.0f);
 
         const size_t num_triangles = model->shapes[shape].mesh.num_face_vertices.size();
         shape_collision.triangles.reserve(num_triangles);
@@ -1336,14 +1337,16 @@ void BuildCollisionDataFromObjModel(ObjModel* model, glm::mat4 model_matrix)
                     model->attrib.vertices[3 * idx.vertex_index + 0],
                     model->attrib.vertices[3 * idx.vertex_index + 1],
                     model->attrib.vertices[3 * idx.vertex_index + 2],
-                    1.0f
-                );
+                    1.0f);
                 const glm::vec4 p_world = model_matrix * p_model;
-                const glm::vec3 p = glm::vec3(p_world.x, p_world.y, p_world.z);
+                const glm::vec4 p = glm::vec4(p_world.x, p_world.y, p_world.z, 1.0f);
 
-                if (vertex == 0) world_triangle.v0 = p;
-                if (vertex == 1) world_triangle.v1 = p;
-                if (vertex == 2) world_triangle.v2 = p;
+                if (vertex == 0)
+                    world_triangle.v0 = p;
+                if (vertex == 1)
+                    world_triangle.v1 = p;
+                if (vertex == 2)
+                    world_triangle.v2 = p;
 
                 shape_collision.bbox_min.x = std::min(shape_collision.bbox_min.x, p.x);
                 shape_collision.bbox_min.y = std::min(shape_collision.bbox_min.y, p.y);
@@ -1367,14 +1370,14 @@ void BuildCollisionDataFromObjModel(ObjModel* model, glm::mat4 model_matrix)
     }
 }
 
-bool CollidesWithScenarioAabb(const glm::vec3& center, const glm::vec3& half_extents)
+bool CollidesWithScenarioAabb(const glm::vec4 &center, const glm::vec4 &half_extents)
 {
-    const glm::vec3 cube_min = center - half_extents;
-    const glm::vec3 cube_max = center + half_extents;
+    const glm::vec4 cube_min = center - half_extents;
+    const glm::vec4 cube_max = center + half_extents;
 
     for (size_t shape_index = 0; shape_index < g_ScenarioCollisionShapes.size(); ++shape_index)
     {
-        const CollisionShape& shape = g_ScenarioCollisionShapes[shape_index];
+        const CollisionShape &shape = g_ScenarioCollisionShapes[shape_index];
 
         // Broad phase: filtra apenas formas com sobreposição de AABB.
         if (!AabbIntersects(cube_min, cube_max, shape.bbox_min, shape.bbox_max))
@@ -1391,22 +1394,22 @@ bool CollidesWithScenarioAabb(const glm::vec3& center, const glm::vec3& half_ext
     return false;
 }
 
-bool CollidesWithScenario(const glm::vec3& cube_center)
+bool CollidesWithScenario(const glm::vec4 &cube_center)
 {
     return CollidesWithScenarioAabb(cube_center, g_PlayerCubeHalfExtents);
 }
 
-glm::vec3 ComputeCameraPositionWithCollision(const glm::vec3& lookat_position, const glm::vec3& desired_camera_position)
+glm::vec4 ComputeCameraPositionWithCollision(const glm::vec4 &lookat_position, const glm::vec4 &desired_camera_position)
 {
     // Busca a posição mais distante possível da câmera ao longo do segmento
     // lookat -> desired, respeitando colisão com o cenário.
     const int steps = 36;
-    const glm::vec3 ray = desired_camera_position - lookat_position;
+    const glm::vec4 ray = desired_camera_position - lookat_position;
 
     for (int i = steps; i >= 0; --i)
     {
         const float t = static_cast<float>(i) / static_cast<float>(steps);
-        const glm::vec3 candidate = lookat_position + ray * t;
+        const glm::vec4 candidate = lookat_position + ray * t;
         if (!CollidesWithScenarioAabb(candidate, g_CameraCollisionHalfExtents))
             return candidate;
     }
@@ -1415,7 +1418,7 @@ glm::vec3 ComputeCameraPositionWithCollision(const glm::vec3& lookat_position, c
 }
 
 // Carrega um Vertex Shader de um arquivo GLSL. Veja definição de LoadShader() abaixo.
-GLuint LoadShader_Vertex(const char* filename)
+GLuint LoadShader_Vertex(const char *filename)
 {
     // Criamos um identificador (ID) para este shader, informando que o mesmo
     // será aplicado nos vértices.
@@ -1429,7 +1432,7 @@ GLuint LoadShader_Vertex(const char* filename)
 }
 
 // Carrega um Fragment Shader de um arquivo GLSL . Veja definição de LoadShader() abaixo.
-GLuint LoadShader_Fragment(const char* filename)
+GLuint LoadShader_Fragment(const char *filename)
 {
     // Criamos um identificador (ID) para este shader, informando que o mesmo
     // será aplicado nos fragmentos.
@@ -1444,24 +1447,27 @@ GLuint LoadShader_Fragment(const char* filename)
 
 // Função auxilar, utilizada pelas duas funções acima. Carrega código de GPU de
 // um arquivo GLSL e faz sua compilação.
-void LoadShader(const char* filename, GLuint shader_id)
+void LoadShader(const char *filename, GLuint shader_id)
 {
     // Lemos o arquivo de texto indicado pela variável "filename"
     // e colocamos seu conteúdo em memória, apontado pela variável
     // "shader_string".
     std::ifstream file;
-    try {
+    try
+    {
         file.exceptions(std::ifstream::failbit);
         file.open(filename);
-    } catch ( std::exception& e ) {
+    }
+    catch (std::exception &e)
+    {
         fprintf(stderr, "ERROR: Cannot open file \"%s\".\n", filename);
         std::exit(EXIT_FAILURE);
     }
     std::stringstream shader;
     shader << file.rdbuf();
     std::string str = shader.str();
-    const GLchar* shader_string = str.c_str();
-    const GLint   shader_string_length = static_cast<GLint>( str.length() );
+    const GLchar *shader_string = str.c_str();
+    const GLint shader_string_length = static_cast<GLint>(str.length());
 
     // Define o código do shader GLSL, contido na string "shader_string"
     glShaderSource(shader_id, 1, &shader_string, &shader_string_length);
@@ -1478,15 +1484,15 @@ void LoadShader(const char* filename, GLuint shader_id)
 
     // Alocamos memória para guardar o log de compilação.
     // A chamada "new" em C++ é equivalente ao "malloc()" do C.
-    GLchar* log = new GLchar[log_length];
+    GLchar *log = new GLchar[log_length];
     glGetShaderInfoLog(shader_id, log_length, &log_length, log);
 
     // Imprime no terminal qualquer erro ou "warning" de compilação
-    if ( log_length != 0 )
+    if (log_length != 0)
     {
-        std::string  output;
+        std::string output;
 
-        if ( !compiled_ok )
+        if (!compiled_ok)
         {
             output += "ERROR: OpenGL compilation of \"";
             output += filename;
@@ -1509,7 +1515,7 @@ void LoadShader(const char* filename, GLuint shader_id)
     }
 
     // A chamada "delete" em C++ é equivalente ao "free()" do C
-    delete [] log;
+    delete[] log;
 }
 
 // Esta função cria um programa de GPU, o qual contém obrigatoriamente um
@@ -1531,14 +1537,14 @@ GLuint CreateGpuProgram(GLuint vertex_shader_id, GLuint fragment_shader_id)
     glGetProgramiv(program_id, GL_LINK_STATUS, &linked_ok);
 
     // Imprime no terminal qualquer erro de linkagem
-    if ( linked_ok == GL_FALSE )
+    if (linked_ok == GL_FALSE)
     {
         GLint log_length = 0;
         glGetProgramiv(program_id, GL_INFO_LOG_LENGTH, &log_length);
 
         // Alocamos memória para guardar o log de compilação.
         // A chamada "new" em C++ é equivalente ao "malloc()" do C.
-        GLchar* log = new GLchar[log_length];
+        GLchar *log = new GLchar[log_length];
 
         glGetProgramInfoLog(program_id, log_length, &log_length, log);
 
@@ -1550,12 +1556,12 @@ GLuint CreateGpuProgram(GLuint vertex_shader_id, GLuint fragment_shader_id)
         output += "\n== End of link log\n";
 
         // A chamada "delete" em C++ é equivalente ao "free()" do C
-        delete [] log;
+        delete[] log;
 
         fprintf(stderr, "%s", output.c_str());
     }
 
-    // Os "Shader Objects" podem ser marcados para deleção após serem linkados 
+    // Os "Shader Objects" podem ser marcados para deleção após serem linkados
     glDeleteShader(vertex_shader_id);
     glDeleteShader(fragment_shader_id);
 
@@ -1566,7 +1572,7 @@ GLuint CreateGpuProgram(GLuint vertex_shader_id, GLuint fragment_shader_id)
 // Definição da função que será chamada sempre que a janela do sistema
 // operacional for redimensionada, por consequência alterando o tamanho do
 // "framebuffer" (região de memória onde são armazenados os pixels da imagem).
-void FramebufferSizeCallback(GLFWwindow* window, int width, int height)
+void FramebufferSizeCallback(GLFWwindow *window, int width, int height)
 {
     // Indicamos que queremos renderizar em toda região do framebuffer. A
     // função "glViewport" define o mapeamento das "normalized device
@@ -1590,7 +1596,7 @@ void FramebufferSizeCallback(GLFWwindow* window, int width, int height)
 double g_LastCursorPosX, g_LastCursorPosY;
 
 // Função callback chamada sempre que o usuário aperta algum dos botões do mouse
-void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
+void MouseButtonCallback(GLFWwindow *window, int button, int action, int mods)
 {
     if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS)
     {
@@ -1644,7 +1650,7 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
 
 // Função callback chamada sempre que o usuário movimentar o cursor do mouse em
 // cima da janela OpenGL.
-void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
+void CursorPosCallback(GLFWwindow *window, double xpos, double ypos)
 {
     // Abaixo executamos o seguinte: caso o botão esquerdo do mouse esteja
     // pressionado, computamos quanto que o mouse se movimento desde o último
@@ -1657,21 +1663,21 @@ void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
         // Deslocamento do cursor do mouse em x e y de coordenadas de tela!
         float dx = xpos - g_LastCursorPosX;
         float dy = ypos - g_LastCursorPosY;
-    
+
         // Atualizamos parâmetros da câmera com os deslocamentos
-        g_CameraTheta -= 0.01f*dx;
-        g_CameraPhi   += 0.01f*dy;
-    
+        g_CameraTheta -= 0.01f * dx;
+        g_CameraPhi += 0.01f * dy;
+
         // Em coordenadas esféricas, o ângulo phi deve ficar entre -pi/2 e +pi/2.
-        float phimax = 3.141592f/2;
+        float phimax = 3.141592f / 2;
         float phimin = -phimax;
-    
+
         if (g_CameraPhi > phimax)
             g_CameraPhi = phimax;
-    
+
         if (g_CameraPhi < phimin)
             g_CameraPhi = phimin;
-    
+
         // Atualizamos as variáveis globais para armazenar a posição atual do
         // cursor como sendo a última posição conhecida do cursor.
         g_LastCursorPosX = xpos;
@@ -1683,11 +1689,11 @@ void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
         // Deslocamento do cursor do mouse em x e y de coordenadas de tela!
         float dx = xpos - g_LastCursorPosX;
         float dy = ypos - g_LastCursorPosY;
-    
+
         // Atualizamos parâmetros da antebraço com os deslocamentos
-        g_ForearmAngleZ -= 0.01f*dx;
-        g_ForearmAngleX += 0.01f*dy;
-    
+        g_ForearmAngleZ -= 0.01f * dx;
+        g_ForearmAngleX += 0.01f * dy;
+
         // Atualizamos as variáveis globais para armazenar a posição atual do
         // cursor como sendo a última posição conhecida do cursor.
         g_LastCursorPosX = xpos;
@@ -1699,11 +1705,11 @@ void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
         // Deslocamento do cursor do mouse em x e y de coordenadas de tela!
         float dx = xpos - g_LastCursorPosX;
         float dy = ypos - g_LastCursorPosY;
-    
+
         // Atualizamos parâmetros da antebraço com os deslocamentos
-        g_TorsoPositionX += 0.01f*dx;
-        g_TorsoPositionY -= 0.01f*dy;
-    
+        g_TorsoPositionX += 0.01f * dx;
+        g_TorsoPositionY -= 0.01f * dy;
+
         // Atualizamos as variáveis globais para armazenar a posição atual do
         // cursor como sendo a última posição conhecida do cursor.
         g_LastCursorPosX = xpos;
@@ -1712,11 +1718,11 @@ void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
 }
 
 // Função callback chamada sempre que o usuário movimenta a "rodinha" do mouse.
-void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset)
+void ScrollCallback(GLFWwindow *window, double xoffset, double yoffset)
 {
     // Atualizamos a distância da câmera para a origem utilizando a
     // movimentação da "rodinha", simulando um ZOOM.
-    g_CameraDistance -= 0.1f*yoffset;
+    g_CameraDistance -= 0.1f * yoffset;
 
     // Uma câmera look-at nunca pode estar exatamente "em cima" do ponto para
     // onde ela está olhando, pois isto gera problemas de divisão por zero na
@@ -1732,7 +1738,7 @@ void Correcao_KeyCallback(int key, int action, int mod);
 
 // Definição da função que será chamada sempre que o usuário pressionar alguma
 // tecla do teclado. Veja http://www.glfw.org/docs/latest/input_guide.html#input_key
-void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mod)
+void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
 {
     // =======================
     // Não modifique esta chamada! Ela é utilizada para correção automatizada dos
@@ -1802,13 +1808,13 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mod)
     if (key == GLFW_KEY_R && action == GLFW_PRESS)
     {
         LoadShadersFromFiles();
-        fprintf(stdout,"Shaders recarregados!\n");
+        fprintf(stdout, "Shaders recarregados!\n");
         fflush(stdout);
     }
 }
 
 // Definimos o callback para impressão de erros da GLFW no terminal
-void ErrorCallback(int error, const char* description)
+void ErrorCallback(int error, const char *description)
 {
     fprintf(stderr, "ERROR: GLFW: %s\n", description);
 }
@@ -1818,68 +1824,66 @@ void ErrorCallback(int error, const char* description)
 // view, e projection; e escreve na tela as matrizes e pontos resultantes
 // dessas transformações.
 void TextRendering_ShowModelViewProjection(
-    GLFWwindow* window,
+    GLFWwindow *window,
     glm::mat4 projection,
     glm::mat4 view,
     glm::mat4 model,
-    glm::vec4 p_model
-)
+    glm::vec4 p_model)
 {
-    if ( !g_ShowInfoText )
+    if (!g_ShowInfoText)
         return;
 
-    glm::vec4 p_world = model*p_model;
-    glm::vec4 p_camera = view*p_world;
-    glm::vec4 p_clip = projection*p_camera;
+    glm::vec4 p_world = model * p_model;
+    glm::vec4 p_camera = view * p_world;
+    glm::vec4 p_clip = projection * p_camera;
     glm::vec4 p_ndc = p_clip / p_clip.w;
 
     float pad = TextRendering_LineHeight(window);
 
-    TextRendering_PrintString(window, " Model matrix             Model     In World Coords.", -1.0f, 1.0f-pad, 1.0f);
-    TextRendering_PrintMatrixVectorProduct(window, model, p_model, -1.0f, 1.0f-2*pad, 1.0f);
+    TextRendering_PrintString(window, " Model matrix             Model     In World Coords.", -1.0f, 1.0f - pad, 1.0f);
+    TextRendering_PrintMatrixVectorProduct(window, model, p_model, -1.0f, 1.0f - 2 * pad, 1.0f);
 
-    TextRendering_PrintString(window, "                                        |  ", -1.0f, 1.0f-6*pad, 1.0f);
-    TextRendering_PrintString(window, "                            .-----------'  ", -1.0f, 1.0f-7*pad, 1.0f);
-    TextRendering_PrintString(window, "                            V              ", -1.0f, 1.0f-8*pad, 1.0f);
+    TextRendering_PrintString(window, "                                        |  ", -1.0f, 1.0f - 6 * pad, 1.0f);
+    TextRendering_PrintString(window, "                            .-----------'  ", -1.0f, 1.0f - 7 * pad, 1.0f);
+    TextRendering_PrintString(window, "                            V              ", -1.0f, 1.0f - 8 * pad, 1.0f);
 
-    TextRendering_PrintString(window, " View matrix              World     In Camera Coords.", -1.0f, 1.0f-9*pad, 1.0f);
-    TextRendering_PrintMatrixVectorProduct(window, view, p_world, -1.0f, 1.0f-10*pad, 1.0f);
+    TextRendering_PrintString(window, " View matrix              World     In Camera Coords.", -1.0f, 1.0f - 9 * pad, 1.0f);
+    TextRendering_PrintMatrixVectorProduct(window, view, p_world, -1.0f, 1.0f - 10 * pad, 1.0f);
 
-    TextRendering_PrintString(window, "                                        |  ", -1.0f, 1.0f-14*pad, 1.0f);
-    TextRendering_PrintString(window, "                            .-----------'  ", -1.0f, 1.0f-15*pad, 1.0f);
-    TextRendering_PrintString(window, "                            V              ", -1.0f, 1.0f-16*pad, 1.0f);
+    TextRendering_PrintString(window, "                                        |  ", -1.0f, 1.0f - 14 * pad, 1.0f);
+    TextRendering_PrintString(window, "                            .-----------'  ", -1.0f, 1.0f - 15 * pad, 1.0f);
+    TextRendering_PrintString(window, "                            V              ", -1.0f, 1.0f - 16 * pad, 1.0f);
 
-    TextRendering_PrintString(window, " Projection matrix        Camera                    In NDC", -1.0f, 1.0f-17*pad, 1.0f);
-    TextRendering_PrintMatrixVectorProductDivW(window, projection, p_camera, -1.0f, 1.0f-18*pad, 1.0f);
+    TextRendering_PrintString(window, " Projection matrix        Camera                    In NDC", -1.0f, 1.0f - 17 * pad, 1.0f);
+    TextRendering_PrintMatrixVectorProductDivW(window, projection, p_camera, -1.0f, 1.0f - 18 * pad, 1.0f);
 
     int width, height;
     glfwGetFramebufferSize(window, &width, &height);
 
     glm::vec2 a = glm::vec2(-1, -1);
     glm::vec2 b = glm::vec2(+1, +1);
-    glm::vec2 p = glm::vec2( 0,  0);
+    glm::vec2 p = glm::vec2(0, 0);
     glm::vec2 q = glm::vec2(width, height);
 
     glm::mat4 viewport_mapping = Matrix(
-        (q.x - p.x)/(b.x-a.x), 0.0f, 0.0f, (b.x*p.x - a.x*q.x)/(b.x-a.x),
-        0.0f, (q.y - p.y)/(b.y-a.y), 0.0f, (b.y*p.y - a.y*q.y)/(b.y-a.y),
-        0.0f , 0.0f , 1.0f , 0.0f ,
-        0.0f , 0.0f , 0.0f , 1.0f
-    );
+        (q.x - p.x) / (b.x - a.x), 0.0f, 0.0f, (b.x * p.x - a.x * q.x) / (b.x - a.x),
+        0.0f, (q.y - p.y) / (b.y - a.y), 0.0f, (b.y * p.y - a.y * q.y) / (b.y - a.y),
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f);
 
-    TextRendering_PrintString(window, "                                                       |  ", -1.0f, 1.0f-22*pad, 1.0f);
-    TextRendering_PrintString(window, "                            .--------------------------'  ", -1.0f, 1.0f-23*pad, 1.0f);
-    TextRendering_PrintString(window, "                            V                           ", -1.0f, 1.0f-24*pad, 1.0f);
+    TextRendering_PrintString(window, "                                                       |  ", -1.0f, 1.0f - 22 * pad, 1.0f);
+    TextRendering_PrintString(window, "                            .--------------------------'  ", -1.0f, 1.0f - 23 * pad, 1.0f);
+    TextRendering_PrintString(window, "                            V                           ", -1.0f, 1.0f - 24 * pad, 1.0f);
 
-    TextRendering_PrintString(window, " Viewport matrix           NDC      In Pixel Coords.", -1.0f, 1.0f-25*pad, 1.0f);
-    TextRendering_PrintMatrixVectorProductMoreDigits(window, viewport_mapping, p_ndc, -1.0f, 1.0f-26*pad, 1.0f);
+    TextRendering_PrintString(window, " Viewport matrix           NDC      In Pixel Coords.", -1.0f, 1.0f - 25 * pad, 1.0f);
+    TextRendering_PrintMatrixVectorProductMoreDigits(window, viewport_mapping, p_ndc, -1.0f, 1.0f - 26 * pad, 1.0f);
 }
 
 // Escrevemos na tela os ângulos de Euler definidos nas variáveis globais
 // g_AngleX, g_AngleY, e g_AngleZ.
-void TextRendering_ShowEulerAngles(GLFWwindow* window)
+void TextRendering_ShowEulerAngles(GLFWwindow *window)
 {
-    if ( !g_ShowInfoText )
+    if (!g_ShowInfoText)
         return;
 
     float pad = TextRendering_LineHeight(window);
@@ -1887,37 +1891,37 @@ void TextRendering_ShowEulerAngles(GLFWwindow* window)
     char buffer[80];
     snprintf(buffer, 80, "Euler Angles rotation matrix = Z(%.2f)*Y(%.2f)*X(%.2f)\n", g_AngleZ, g_AngleY, g_AngleX);
 
-    TextRendering_PrintString(window, buffer, -1.0f+pad/10, -1.0f+2*pad/10, 1.0f);
+    TextRendering_PrintString(window, buffer, -1.0f + pad / 10, -1.0f + 2 * pad / 10, 1.0f);
 }
 
 // Escrevemos na tela qual matriz de projeção está sendo utilizada.
-void TextRendering_ShowProjection(GLFWwindow* window)
+void TextRendering_ShowProjection(GLFWwindow *window)
 {
-    if ( !g_ShowInfoText )
+    if (!g_ShowInfoText)
         return;
 
     float lineheight = TextRendering_LineHeight(window);
     float charwidth = TextRendering_CharWidth(window);
 
-    if ( g_UsePerspectiveProjection )
-        TextRendering_PrintString(window, "Perspective", 1.0f-13*charwidth, -1.0f+2*lineheight/10, 1.0f);
+    if (g_UsePerspectiveProjection)
+        TextRendering_PrintString(window, "Perspective", 1.0f - 13 * charwidth, -1.0f + 2 * lineheight / 10, 1.0f);
     else
-        TextRendering_PrintString(window, "Orthographic", 1.0f-13*charwidth, -1.0f+2*lineheight/10, 1.0f);
+        TextRendering_PrintString(window, "Orthographic", 1.0f - 13 * charwidth, -1.0f + 2 * lineheight / 10, 1.0f);
 }
 
 // Escrevemos na tela o número de quadros renderizados por segundo (frames per
 // second).
-void TextRendering_ShowFramesPerSecond(GLFWwindow* window)
+void TextRendering_ShowFramesPerSecond(GLFWwindow *window)
 {
-    if ( !g_ShowInfoText )
+    if (!g_ShowInfoText)
         return;
 
     // Variáveis estáticas (static) mantém seus valores entre chamadas
     // subsequentes da função!
     static float old_seconds = (float)glfwGetTime();
-    static int   ellapsed_frames = 0;
-    static char  buffer[20] = "?? fps";
-    static int   numchars = 7;
+    static int ellapsed_frames = 0;
+    static char buffer[20] = "?? fps";
+    static int numchars = 7;
 
     ellapsed_frames += 1;
 
@@ -1927,10 +1931,10 @@ void TextRendering_ShowFramesPerSecond(GLFWwindow* window)
     // Número de segundos desde o último cálculo do fps
     float ellapsed_seconds = seconds - old_seconds;
 
-    if ( ellapsed_seconds > 1.0f )
+    if (ellapsed_seconds > 1.0f)
     {
         numchars = snprintf(buffer, 20, "%.2f fps", ellapsed_frames / ellapsed_seconds);
-    
+
         old_seconds = seconds;
         ellapsed_frames = 0;
     }
@@ -1938,176 +1942,191 @@ void TextRendering_ShowFramesPerSecond(GLFWwindow* window)
     float lineheight = TextRendering_LineHeight(window);
     float charwidth = TextRendering_CharWidth(window);
 
-    TextRendering_PrintString(window, buffer, 1.0f-(numchars + 1)*charwidth, 1.0f-lineheight, 1.0f);
+    TextRendering_PrintString(window, buffer, 1.0f - (numchars + 1) * charwidth, 1.0f - lineheight, 1.0f);
 }
 
 // Função para debugging: imprime no terminal todas informações de um modelo
 // geométrico carregado de um arquivo ".obj".
 // Veja: https://github.com/syoyo/tinyobjloader/blob/22883def8db9ef1f3ffb9b404318e7dd25fdbb51/loader_example.cc#L98
-void PrintObjModelInfo(ObjModel* model)
+void PrintObjModelInfo(ObjModel *model)
 {
-  const tinyobj::attrib_t                & attrib    = model->attrib;
-  const std::vector<tinyobj::shape_t>    & shapes    = model->shapes;
-  const std::vector<tinyobj::material_t> & materials = model->materials;
+    const tinyobj::attrib_t &attrib = model->attrib;
+    const std::vector<tinyobj::shape_t> &shapes = model->shapes;
+    const std::vector<tinyobj::material_t> &materials = model->materials;
 
-  printf("# of vertices  : %d\n", (int)(attrib.vertices.size() / 3));
-  printf("# of normals   : %d\n", (int)(attrib.normals.size() / 3));
-  printf("# of texcoords : %d\n", (int)(attrib.texcoords.size() / 2));
-  printf("# of shapes    : %d\n", (int)shapes.size());
-  printf("# of materials : %d\n", (int)materials.size());
+    printf("# of vertices  : %d\n", (int)(attrib.vertices.size() / 3));
+    printf("# of normals   : %d\n", (int)(attrib.normals.size() / 3));
+    printf("# of texcoords : %d\n", (int)(attrib.texcoords.size() / 2));
+    printf("# of shapes    : %d\n", (int)shapes.size());
+    printf("# of materials : %d\n", (int)materials.size());
 
-  for (size_t v = 0; v < attrib.vertices.size() / 3; v++) {
-    printf("  v[%ld] = (%f, %f, %f)\n", static_cast<long>(v),
-           static_cast<const double>(attrib.vertices[3 * v + 0]),
-           static_cast<const double>(attrib.vertices[3 * v + 1]),
-           static_cast<const double>(attrib.vertices[3 * v + 2]));
-  }
-
-  for (size_t v = 0; v < attrib.normals.size() / 3; v++) {
-    printf("  n[%ld] = (%f, %f, %f)\n", static_cast<long>(v),
-           static_cast<const double>(attrib.normals[3 * v + 0]),
-           static_cast<const double>(attrib.normals[3 * v + 1]),
-           static_cast<const double>(attrib.normals[3 * v + 2]));
-  }
-
-  for (size_t v = 0; v < attrib.texcoords.size() / 2; v++) {
-    printf("  uv[%ld] = (%f, %f)\n", static_cast<long>(v),
-           static_cast<const double>(attrib.texcoords[2 * v + 0]),
-           static_cast<const double>(attrib.texcoords[2 * v + 1]));
-  }
-
-  // For each shape
-  for (size_t i = 0; i < shapes.size(); i++) {
-    printf("shape[%ld].name = %s\n", static_cast<long>(i),
-           shapes[i].name.c_str());
-    printf("Size of shape[%ld].indices: %lu\n", static_cast<long>(i),
-           static_cast<unsigned long>(shapes[i].mesh.indices.size()));
-
-    size_t index_offset = 0;
-
-    assert(shapes[i].mesh.num_face_vertices.size() ==
-           shapes[i].mesh.material_ids.size());
-
-    printf("shape[%ld].num_faces: %lu\n", static_cast<long>(i),
-           static_cast<unsigned long>(shapes[i].mesh.num_face_vertices.size()));
-
-    // For each face
-    for (size_t f = 0; f < shapes[i].mesh.num_face_vertices.size(); f++) {
-      size_t fnum = shapes[i].mesh.num_face_vertices[f];
-
-      printf("  face[%ld].fnum = %ld\n", static_cast<long>(f),
-             static_cast<unsigned long>(fnum));
-
-      // For each vertex in the face
-      for (size_t v = 0; v < fnum; v++) {
-        tinyobj::index_t idx = shapes[i].mesh.indices[index_offset + v];
-        printf("    face[%ld].v[%ld].idx = %d/%d/%d\n", static_cast<long>(f),
-               static_cast<long>(v), idx.vertex_index, idx.normal_index,
-               idx.texcoord_index);
-      }
-
-      printf("  face[%ld].material_id = %d\n", static_cast<long>(f),
-             shapes[i].mesh.material_ids[f]);
-
-      index_offset += fnum;
+    for (size_t v = 0; v < attrib.vertices.size() / 3; v++)
+    {
+        printf("  v[%ld] = (%f, %f, %f)\n", static_cast<long>(v),
+               static_cast<const double>(attrib.vertices[3 * v + 0]),
+               static_cast<const double>(attrib.vertices[3 * v + 1]),
+               static_cast<const double>(attrib.vertices[3 * v + 2]));
     }
 
-    printf("shape[%ld].num_tags: %lu\n", static_cast<long>(i),
-           static_cast<unsigned long>(shapes[i].mesh.tags.size()));
-    for (size_t t = 0; t < shapes[i].mesh.tags.size(); t++) {
-      printf("  tag[%ld] = %s ", static_cast<long>(t),
-             shapes[i].mesh.tags[t].name.c_str());
-      printf(" ints: [");
-      for (size_t j = 0; j < shapes[i].mesh.tags[t].intValues.size(); ++j) {
-        printf("%ld", static_cast<long>(shapes[i].mesh.tags[t].intValues[j]));
-        if (j < (shapes[i].mesh.tags[t].intValues.size() - 1)) {
-          printf(", ");
-        }
-      }
-      printf("]");
-
-      printf(" floats: [");
-      for (size_t j = 0; j < shapes[i].mesh.tags[t].floatValues.size(); ++j) {
-        printf("%f", static_cast<const double>(
-                         shapes[i].mesh.tags[t].floatValues[j]));
-        if (j < (shapes[i].mesh.tags[t].floatValues.size() - 1)) {
-          printf(", ");
-        }
-      }
-      printf("]");
-
-      printf(" strings: [");
-      for (size_t j = 0; j < shapes[i].mesh.tags[t].stringValues.size(); ++j) {
-        printf("%s", shapes[i].mesh.tags[t].stringValues[j].c_str());
-        if (j < (shapes[i].mesh.tags[t].stringValues.size() - 1)) {
-          printf(", ");
-        }
-      }
-      printf("]");
-      printf("\n");
+    for (size_t v = 0; v < attrib.normals.size() / 3; v++)
+    {
+        printf("  n[%ld] = (%f, %f, %f)\n", static_cast<long>(v),
+               static_cast<const double>(attrib.normals[3 * v + 0]),
+               static_cast<const double>(attrib.normals[3 * v + 1]),
+               static_cast<const double>(attrib.normals[3 * v + 2]));
     }
-  }
 
-  for (size_t i = 0; i < materials.size(); i++) {
-    printf("material[%ld].name = %s\n", static_cast<long>(i),
-           materials[i].name.c_str());
-    printf("  material.Ka = (%f, %f ,%f)\n",
-           static_cast<const double>(materials[i].ambient[0]),
-           static_cast<const double>(materials[i].ambient[1]),
-           static_cast<const double>(materials[i].ambient[2]));
-    printf("  material.Kd = (%f, %f ,%f)\n",
-           static_cast<const double>(materials[i].diffuse[0]),
-           static_cast<const double>(materials[i].diffuse[1]),
-           static_cast<const double>(materials[i].diffuse[2]));
-    printf("  material.Ks = (%f, %f ,%f)\n",
-           static_cast<const double>(materials[i].specular[0]),
-           static_cast<const double>(materials[i].specular[1]),
-           static_cast<const double>(materials[i].specular[2]));
-    printf("  material.Tr = (%f, %f ,%f)\n",
-           static_cast<const double>(materials[i].transmittance[0]),
-           static_cast<const double>(materials[i].transmittance[1]),
-           static_cast<const double>(materials[i].transmittance[2]));
-    printf("  material.Ke = (%f, %f ,%f)\n",
-           static_cast<const double>(materials[i].emission[0]),
-           static_cast<const double>(materials[i].emission[1]),
-           static_cast<const double>(materials[i].emission[2]));
-    printf("  material.Ns = %f\n",
-           static_cast<const double>(materials[i].shininess));
-    printf("  material.Ni = %f\n", static_cast<const double>(materials[i].ior));
-    printf("  material.dissolve = %f\n",
-           static_cast<const double>(materials[i].dissolve));
-    printf("  material.illum = %d\n", materials[i].illum);
-    printf("  material.map_Ka = %s\n", materials[i].ambient_texname.c_str());
-    printf("  material.map_Kd = %s\n", materials[i].diffuse_texname.c_str());
-    printf("  material.map_Ks = %s\n", materials[i].specular_texname.c_str());
-    printf("  material.map_Ns = %s\n",
-           materials[i].specular_highlight_texname.c_str());
-    printf("  material.map_bump = %s\n", materials[i].bump_texname.c_str());
-    printf("  material.map_d = %s\n", materials[i].alpha_texname.c_str());
-    printf("  material.disp = %s\n", materials[i].displacement_texname.c_str());
-    printf("  <<PBR>>\n");
-    printf("  material.Pr     = %f\n", materials[i].roughness);
-    printf("  material.Pm     = %f\n", materials[i].metallic);
-    printf("  material.Ps     = %f\n", materials[i].sheen);
-    printf("  material.Pc     = %f\n", materials[i].clearcoat_thickness);
-    printf("  material.Pcr    = %f\n", materials[i].clearcoat_thickness);
-    printf("  material.aniso  = %f\n", materials[i].anisotropy);
-    printf("  material.anisor = %f\n", materials[i].anisotropy_rotation);
-    printf("  material.map_Ke = %s\n", materials[i].emissive_texname.c_str());
-    printf("  material.map_Pr = %s\n", materials[i].roughness_texname.c_str());
-    printf("  material.map_Pm = %s\n", materials[i].metallic_texname.c_str());
-    printf("  material.map_Ps = %s\n", materials[i].sheen_texname.c_str());
-    printf("  material.norm   = %s\n", materials[i].normal_texname.c_str());
-    std::map<std::string, std::string>::const_iterator it(
-        materials[i].unknown_parameter.begin());
-    std::map<std::string, std::string>::const_iterator itEnd(
-        materials[i].unknown_parameter.end());
-
-    for (; it != itEnd; it++) {
-      printf("  material.%s = %s\n", it->first.c_str(), it->second.c_str());
+    for (size_t v = 0; v < attrib.texcoords.size() / 2; v++)
+    {
+        printf("  uv[%ld] = (%f, %f)\n", static_cast<long>(v),
+               static_cast<const double>(attrib.texcoords[2 * v + 0]),
+               static_cast<const double>(attrib.texcoords[2 * v + 1]));
     }
-    printf("\n");
-  }
+
+    // For each shape
+    for (size_t i = 0; i < shapes.size(); i++)
+    {
+        printf("shape[%ld].name = %s\n", static_cast<long>(i),
+               shapes[i].name.c_str());
+        printf("Size of shape[%ld].indices: %lu\n", static_cast<long>(i),
+               static_cast<unsigned long>(shapes[i].mesh.indices.size()));
+
+        size_t index_offset = 0;
+
+        assert(shapes[i].mesh.num_face_vertices.size() ==
+               shapes[i].mesh.material_ids.size());
+
+        printf("shape[%ld].num_faces: %lu\n", static_cast<long>(i),
+               static_cast<unsigned long>(shapes[i].mesh.num_face_vertices.size()));
+
+        // For each face
+        for (size_t f = 0; f < shapes[i].mesh.num_face_vertices.size(); f++)
+        {
+            size_t fnum = shapes[i].mesh.num_face_vertices[f];
+
+            printf("  face[%ld].fnum = %ld\n", static_cast<long>(f),
+                   static_cast<unsigned long>(fnum));
+
+            // For each vertex in the face
+            for (size_t v = 0; v < fnum; v++)
+            {
+                tinyobj::index_t idx = shapes[i].mesh.indices[index_offset + v];
+                printf("    face[%ld].v[%ld].idx = %d/%d/%d\n", static_cast<long>(f),
+                       static_cast<long>(v), idx.vertex_index, idx.normal_index,
+                       idx.texcoord_index);
+            }
+
+            printf("  face[%ld].material_id = %d\n", static_cast<long>(f),
+                   shapes[i].mesh.material_ids[f]);
+
+            index_offset += fnum;
+        }
+
+        printf("shape[%ld].num_tags: %lu\n", static_cast<long>(i),
+               static_cast<unsigned long>(shapes[i].mesh.tags.size()));
+        for (size_t t = 0; t < shapes[i].mesh.tags.size(); t++)
+        {
+            printf("  tag[%ld] = %s ", static_cast<long>(t),
+                   shapes[i].mesh.tags[t].name.c_str());
+            printf(" ints: [");
+            for (size_t j = 0; j < shapes[i].mesh.tags[t].intValues.size(); ++j)
+            {
+                printf("%ld", static_cast<long>(shapes[i].mesh.tags[t].intValues[j]));
+                if (j < (shapes[i].mesh.tags[t].intValues.size() - 1))
+                {
+                    printf(", ");
+                }
+            }
+            printf("]");
+
+            printf(" floats: [");
+            for (size_t j = 0; j < shapes[i].mesh.tags[t].floatValues.size(); ++j)
+            {
+                printf("%f", static_cast<const double>(
+                                 shapes[i].mesh.tags[t].floatValues[j]));
+                if (j < (shapes[i].mesh.tags[t].floatValues.size() - 1))
+                {
+                    printf(", ");
+                }
+            }
+            printf("]");
+
+            printf(" strings: [");
+            for (size_t j = 0; j < shapes[i].mesh.tags[t].stringValues.size(); ++j)
+            {
+                printf("%s", shapes[i].mesh.tags[t].stringValues[j].c_str());
+                if (j < (shapes[i].mesh.tags[t].stringValues.size() - 1))
+                {
+                    printf(", ");
+                }
+            }
+            printf("]");
+            printf("\n");
+        }
+    }
+
+    for (size_t i = 0; i < materials.size(); i++)
+    {
+        printf("material[%ld].name = %s\n", static_cast<long>(i),
+               materials[i].name.c_str());
+        printf("  material.Ka = (%f, %f ,%f)\n",
+               static_cast<const double>(materials[i].ambient[0]),
+               static_cast<const double>(materials[i].ambient[1]),
+               static_cast<const double>(materials[i].ambient[2]));
+        printf("  material.Kd = (%f, %f ,%f)\n",
+               static_cast<const double>(materials[i].diffuse[0]),
+               static_cast<const double>(materials[i].diffuse[1]),
+               static_cast<const double>(materials[i].diffuse[2]));
+        printf("  material.Ks = (%f, %f ,%f)\n",
+               static_cast<const double>(materials[i].specular[0]),
+               static_cast<const double>(materials[i].specular[1]),
+               static_cast<const double>(materials[i].specular[2]));
+        printf("  material.Tr = (%f, %f ,%f)\n",
+               static_cast<const double>(materials[i].transmittance[0]),
+               static_cast<const double>(materials[i].transmittance[1]),
+               static_cast<const double>(materials[i].transmittance[2]));
+        printf("  material.Ke = (%f, %f ,%f)\n",
+               static_cast<const double>(materials[i].emission[0]),
+               static_cast<const double>(materials[i].emission[1]),
+               static_cast<const double>(materials[i].emission[2]));
+        printf("  material.Ns = %f\n",
+               static_cast<const double>(materials[i].shininess));
+        printf("  material.Ni = %f\n", static_cast<const double>(materials[i].ior));
+        printf("  material.dissolve = %f\n",
+               static_cast<const double>(materials[i].dissolve));
+        printf("  material.illum = %d\n", materials[i].illum);
+        printf("  material.map_Ka = %s\n", materials[i].ambient_texname.c_str());
+        printf("  material.map_Kd = %s\n", materials[i].diffuse_texname.c_str());
+        printf("  material.map_Ks = %s\n", materials[i].specular_texname.c_str());
+        printf("  material.map_Ns = %s\n",
+               materials[i].specular_highlight_texname.c_str());
+        printf("  material.map_bump = %s\n", materials[i].bump_texname.c_str());
+        printf("  material.map_d = %s\n", materials[i].alpha_texname.c_str());
+        printf("  material.disp = %s\n", materials[i].displacement_texname.c_str());
+        printf("  <<PBR>>\n");
+        printf("  material.Pr     = %f\n", materials[i].roughness);
+        printf("  material.Pm     = %f\n", materials[i].metallic);
+        printf("  material.Ps     = %f\n", materials[i].sheen);
+        printf("  material.Pc     = %f\n", materials[i].clearcoat_thickness);
+        printf("  material.Pcr    = %f\n", materials[i].clearcoat_thickness);
+        printf("  material.aniso  = %f\n", materials[i].anisotropy);
+        printf("  material.anisor = %f\n", materials[i].anisotropy_rotation);
+        printf("  material.map_Ke = %s\n", materials[i].emissive_texname.c_str());
+        printf("  material.map_Pr = %s\n", materials[i].roughness_texname.c_str());
+        printf("  material.map_Pm = %s\n", materials[i].metallic_texname.c_str());
+        printf("  material.map_Ps = %s\n", materials[i].sheen_texname.c_str());
+        printf("  material.norm   = %s\n", materials[i].normal_texname.c_str());
+        std::map<std::string, std::string>::const_iterator it(
+            materials[i].unknown_parameter.begin());
+        std::map<std::string, std::string>::const_iterator itEnd(
+            materials[i].unknown_parameter.end());
+
+        for (; it != itEnd; it++)
+        {
+            printf("  material.%s = %s\n", it->first.c_str(), it->second.c_str());
+        }
+        printf("\n");
+    }
 }
 
 // set makeprg=cd\ ..\ &&\ make\ run\ >/dev/null
