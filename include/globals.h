@@ -9,3 +9,5 @@ extern glm::vec4 g_PlayerCubePosition;
 extern glm::vec4 g_PlayerCubeHalfExtents;
 extern bool g_PlayerCubeColliding;
 extern std::vector<CollisionShape> g_ScenarioCollisionShapes;
+extern float g_PlayerVerticalVelocity;
+extern bool  g_PlayerOnGround;

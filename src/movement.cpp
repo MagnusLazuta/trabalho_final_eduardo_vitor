@@ -8,6 +8,9 @@
 #include "types.h"
 #include "globals.h"
 
+const float gravity = -9.8f;      // aceleração
+const float jump_speed = 5.0f;    // pulo
+
 float UpdatePlayerMovement(GLFWwindow* window, float delta_time)
 {
     glm::vec4 intended_move(0.0f);
@@ -40,6 +43,14 @@ float UpdatePlayerMovement(GLFWwindow* window, float delta_time)
         player_forward *
         (move_input * move_speed * delta_time);
 
+    // aplicar gravidade
+    g_PlayerVerticalVelocity += gravity * delta_time;
+
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && g_PlayerOnGround){
+        g_PlayerVerticalVelocity = jump_speed;
+        g_PlayerOnGround = false;
+    }
+
     // slide movement
     glm::vec4 updated_position = g_PlayerCubePosition;
 
@@ -63,6 +74,25 @@ float UpdatePlayerMovement(GLFWwindow* window, float delta_time)
             g_PlayerCubeHalfExtents))
     {
         updated_position.z = test_position_z.z;
+    }
+
+    // movimento vertical (gravidade)
+    glm::vec4 test_position_y = updated_position;
+    test_position_y.y += g_PlayerVerticalVelocity * delta_time;
+
+    if (!CollidesWithScenario(
+            test_position_y,
+            g_ScenarioCollisionShapes,
+            g_PlayerCubeHalfExtents))
+    {
+        updated_position.y = test_position_y.y;
+        g_PlayerOnGround = false;
+    }
+    else
+    {
+        // bateu no chão ou teto
+        g_PlayerVerticalVelocity = 0.0f;
+        g_PlayerOnGround = true;
     }
 
     g_PlayerCubePosition = updated_position;
