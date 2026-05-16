@@ -4,6 +4,7 @@
 #include <glm/vec4.hpp>
 #include <vector>
 #include "matrices.h"
+#include "types.h"
 
 struct CollisionRay
 {
@@ -24,6 +25,13 @@ struct CollisionAABB
     glm::vec4 max;
 };
 
+struct CollisionShape
+{
+    glm::vec4 bbox_min;
+    glm::vec4 bbox_max;
+    std::vector<Triangle> triangles;
+};
+
 // Broad Phase: AABB vs AABB
 bool AabbAabbIntersect(CollisionAABB a, CollisionAABB b);
 
@@ -31,6 +39,19 @@ bool AabbAabbIntersect(CollisionAABB a, CollisionAABB b);
 bool RayAabbIntersect(CollisionRay r, CollisionAABB a, float &t);
 
 // Narrow Phase: Ray vs Triangle
-    bool RayTriangleIntersect(CollisionRay r, CollisionTriangle tri, float &t);
+bool RayTriangleIntersect(CollisionRay r, CollisionTriangle tri, float &t);
+
+bool CollidesWithScenarioAabb(const glm::vec4 &center, const glm::vec4 &half_extents);
+
+bool CollidesWithScenario(const glm::vec4 &cube_center, const std::vector<CollisionShape> &g_ScenarioCollisionShapes, const glm::vec4 &g_PlayerCubeHalfExtents);
+
+bool TriangleIntersectsAabb(const Triangle &triangle, const glm::vec4 &box_center, const glm::vec4 &box_half_extents);
+
+static bool OverlapOnAxis(
+    const glm::vec4 &v0,
+    const glm::vec4 &v1,
+    const glm::vec4 &v2,
+    const glm::vec4 &axis,
+    const glm::vec4 &half_extents);
 
 #endif // _COLLISION_H

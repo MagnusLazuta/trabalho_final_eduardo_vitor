@@ -48,7 +48,8 @@
 // Headers locais, definidos na pasta "include/"
 #include "utils.h"
 #include "matrices.h"
-    #include "collision.h"
+#include "collision.h"
+#include "types.h"
 
 // Estrutura que representa um modelo geométrico carregado a partir de um
 // arquivo ".obj". Veja https://en.wikipedia.org/wiki/Wavefront_.obj_file .
@@ -114,20 +115,18 @@ void PopMatrix(glm::mat4 &M);
 
 // Declaração de várias funções utilizadas em main().  Essas estão definidas
 // logo após a definição de main() neste arquivo.
-void BuildTrianglesAndAddToVirtualScene(ObjModel *);                                   // Constrói representação de um ObjModel como malha de triângulos para renderização
-void ComputeNormals(ObjModel *model);                                                  // Computa normais de um ObjModel, caso não existam.
-void LoadShadersFromFiles();                                                           // Carrega os shaders de vértice e fragmento, criando um programa de GPU
-void LoadTextureImage(const char *filename);                                           // Função que carrega imagens de textura
-void DrawVirtualObject(const char *object_name);                                       // Desenha um objeto armazenado em g_VirtualScene
-GLuint LoadShader_Vertex(const char *filename);                                        // Carrega um vertex shader
-GLuint LoadShader_Fragment(const char *filename);                                      // Carrega um fragment shader
-void LoadShader(const char *filename, GLuint shader_id);                               // Função utilizada pelas duas acima
-GLuint CreateGpuProgram(GLuint vertex_shader_id, GLuint fragment_shader_id);           // Cria um programa de GPU
-void PrintObjModelInfo(ObjModel *);                                                    // Função para debugging
-void BuildUnitCubeAndAddToVirtualScene(const char *object_name);                       // Constrói cubo unitário para teste de colisão
-void BuildCollisionDataFromObjModel(ObjModel *model, glm::mat4 model_matrix);          // Constrói dados de colisão para o cenário
-bool CollidesWithScenario(const glm::vec4 &cube_center);                               // Testa colisão do cubo com o cenário
-bool CollidesWithScenarioAabb(const glm::vec4 &center, const glm::vec4 &half_extents); // Testa colisão de AABB genérica com o cenário
+void BuildTrianglesAndAddToVirtualScene(ObjModel *);                          // Constrói representação de um ObjModel como malha de triângulos para renderização
+void ComputeNormals(ObjModel *model);                                         // Computa normais de um ObjModel, caso não existam.
+void LoadShadersFromFiles();                                                  // Carrega os shaders de vértice e fragmento, criando um programa de GPU
+void LoadTextureImage(const char *filename);                                  // Função que carrega imagens de textura
+void DrawVirtualObject(const char *object_name);                              // Desenha um objeto armazenado em g_VirtualScene
+GLuint LoadShader_Vertex(const char *filename);                               // Carrega um vertex shader
+GLuint LoadShader_Fragment(const char *filename);                             // Carrega um fragment shader
+void LoadShader(const char *filename, GLuint shader_id);                      // Função utilizada pelas duas acima
+GLuint CreateGpuProgram(GLuint vertex_shader_id, GLuint fragment_shader_id);  // Cria um programa de GPU
+void PrintObjModelInfo(ObjModel *);                                           // Função para debugging
+void BuildUnitCubeAndAddToVirtualScene(const char *object_name);              // Constrói cubo unitário para teste de colisão
+void BuildCollisionDataFromObjModel(ObjModel *model, glm::mat4 model_matrix); // Constrói dados de colisão para o cenário
 void ComputeObjBounds(ObjModel *model, glm::vec4 &bbox_min, glm::vec4 &bbox_max);
 glm::vec4 ComputeCameraPositionWithCollision(const glm::vec4 &lookat_position, const glm::vec4 &desired_camera_position);
 
@@ -172,20 +171,6 @@ struct SceneObject
     glm::vec4 bbox_max;
 };
 
-struct Triangle
-{
-    glm::vec4 v0;
-    glm::vec4 v1;
-    glm::vec4 v2;
-};
-
-struct CollisionShape
-{
-    glm::vec4 bbox_min;
-    glm::vec4 bbox_max;
-    std::vector<Triangle> triangles;
-};
-
 // Abaixo definimos variáveis globais utilizadas em várias funções do código.
 
 // A cena virtual é uma lista de objetos nomeados, guardados em um dicionário
@@ -197,7 +182,7 @@ std::map<std::string, SceneObject> g_VirtualScene;
 // Pilha que guardará as matrizes de modelagem.
 std::stack<glm::mat4> g_MatrixStack;
 std::vector<std::string> g_ScenarioObjectNames;
-std::vector<CollisionShape> g_ScenarioCollisionShapes;
+static std::vector<CollisionShape> g_ScenarioCollisionShapes;
 
 glm::vec4 g_ScenarioBoundsMin = glm::vec4(+std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), 1.0f);
 glm::vec4 g_ScenarioBoundsMax = glm::vec4(-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), 1.0f);
@@ -206,11 +191,11 @@ glm::mat4 g_ScenarioModelMatrix = Matrix_Identity();
 const char *g_SceneMapPath = "../../assets/scenes/scene00/map.obj";
 const char *g_SceneCollisionPath = "../../assets/scenes/scene00/collision.obj";
 
-glm::vec4 g_PlayerCubeHalfExtents(0.30f, 0.30f, 0.30f, 0.0f);
-glm::vec4 g_PlayerCubePosition(0.0f, 0.0f, 0.0f, 1.0f);
-const glm::vec4 g_HardcodedTestSpawnPosition(2.46f, 4.80f, 1.28f, 1.0f);
-float g_PlayerYaw = 0.0f;
-bool g_PlayerCubeColliding = false;
+static glm::vec4 g_PlayerCubeHalfExtents(0.30f, 0.30f, 0.30f, 0.0f);
+static glm::vec4 g_PlayerCubePosition(0.0f, 0.0f, 0.0f, 1.0f);
+static const glm::vec4 g_HardcodedTestSpawnPosition(2.46f, 4.80f, 1.28f, 1.0f);
+static float g_PlayerYaw = 0.0f;
+static bool g_PlayerCubeColliding = false;
 
 // Razão de proporção da janela (largura/altura). Veja função FramebufferSizeCallback().
 float g_ScreenRatio = 1.0f;
@@ -531,20 +516,20 @@ int main()
 
         glm::vec4 test_position_x = updated_position;
         test_position_x.x += intended_move.x;
-        if (!CollidesWithScenario(test_position_x))
+        if (!CollidesWithScenario(test_position_x, g_ScenarioCollisionShapes, g_PlayerCubeHalfExtents))
         {
             updated_position.x = test_position_x.x;
         }
 
         glm::vec4 test_position_z = updated_position;
         test_position_z.z += intended_move.z;
-        if (!CollidesWithScenario(test_position_z))
+        if (!CollidesWithScenario(test_position_z, g_ScenarioCollisionShapes, g_PlayerCubeHalfExtents))
         {
             updated_position.z = test_position_z.z;
         }
 
         g_PlayerCubePosition = updated_position;
-        g_PlayerCubeColliding = CollidesWithScenario(g_PlayerCubePosition);
+        g_PlayerCubeColliding = CollidesWithScenario(g_PlayerCubePosition, g_ScenarioCollisionShapes, g_PlayerCubeHalfExtents);
 
         glfwSetWindowTitle(
             window,
@@ -588,6 +573,7 @@ int main()
             g_CameraSmoothedPosition = desired_camera_world;
             g_CameraInitialized = true;
         }
+        
         g_CameraSmoothedPosition = SmoothFollowVec4(
             g_CameraSmoothedPosition,
             desired_camera_world,
@@ -599,13 +585,21 @@ int main()
         g_CameraSmoothedPosition = camera_position_world;
 
         // Abaixo definimos as varáveis que efetivamente definem a câmera virtual.
-        glm::vec4 camera_position_c = glm::vec4(camera_position_world.x, camera_position_world.y, camera_position_world.z, 1.0f); // Ponto "c", centro da câmera
+        glm::vec4 camera_position_c = glm::vec4(camera_position_world.x, camera_position_world.y, camera_position_world.z, 1.0f); // Ponto "c", centro da câmera// Ponto "c", centro da câmera
         glm::vec4 camera_lookat_l = glm::vec4(camera_lookat_world.x, camera_lookat_world.y, camera_lookat_world.z, 1.0f);         // Ponto "l", para onde a câmera (look-at) estará olhando
         glm::vec4 camera_view_vector = camera_lookat_l - camera_position_c;                                                       // Vetor "view", sentido para onde a câmera está virada
         glm::vec4 camera_up_vector = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);                                                           // Vetor "up" fixado para apontar para o "céu" (eito Y global)
 
+        if (glm::length(camera_view_vector) <= 0.001f)
+        {
+            camera_view_vector = glm::vec4(0.0f, 0.0f, -1.0f, 0.0f); // Força um vetor válido apontando para frente
+        }
+
         // Computamos a matriz "View" utilizando os parâmetros da câmera para
         // definir o sistema de coordenadas da câmera.  Veja slides 2-14, 184-190 e 236-242 do documento Aula_08_Sistemas_de_Coordenadas.pdf.
+        PrintVector(camera_position_c);
+        PrintVector(camera_view_vector);
+        PrintVector(camera_up_vector);
         glm::mat4 view = Matrix_Camera_View(camera_position_c, camera_view_vector, camera_up_vector);
 
         // Agora computamos a matriz de Projeção.
@@ -1225,83 +1219,6 @@ void BuildUnitCubeAndAddToVirtualScene(const char *object_name)
     glBindVertexArray(0);
 }
 
-static bool OverlapOnAxis(
-    const glm::vec4 &v0,
-    const glm::vec4 &v1,
-    const glm::vec4 &v2,
-    const glm::vec4 &axis,
-    const glm::vec4 &half_extents)
-{
-    const float eps = 1e-7f;
-    if (dotproduct(axis, axis) < eps)
-        return true;
-
-    const float p0 = dotproduct(v0, axis);
-    const float p1 = dotproduct(v1, axis);
-    const float p2 = dotproduct(v2, axis);
-    const float tri_min = std::min(p0, std::min(p1, p2));
-    const float tri_max = std::max(p0, std::max(p1, p2));
-
-    const float r =
-        half_extents.x * std::fabs(axis.x) +
-        half_extents.y * std::fabs(axis.y) +
-        half_extents.z * std::fabs(axis.z);
-
-    return !(tri_min > r || tri_max < -r);
-}
-
-static bool TriangleIntersectsAabb(
-    const Triangle &triangle,
-    const glm::vec4 &box_center,
-    const glm::vec4 &box_half_extents)
-{
-    // Colocamos tudo no referencial local da AABB (caixa centrada na origem).
-    const glm::vec4 v0 = triangle.v0 - box_center;
-    const glm::vec4 v1 = triangle.v1 - box_center;
-    const glm::vec4 v2 = triangle.v2 - box_center;
-
-    const glm::vec4 e0 = v1 - v0;
-    const glm::vec4 e1 = v2 - v1;
-    const glm::vec4 e2 = v0 - v2;
-    const glm::vec4 edges[3] = {e0, e1, e2};
-    const glm::vec4 axis_basis[3] =
-        {
-            glm::vec4(1.0f, 0.0f, 0.0f, 0.0f),
-            glm::vec4(0.0f, 1.0f, 0.0f, 0.0f),
-            glm::vec4(0.0f, 0.0f, 1.0f, 0.0f),
-        };
-
-    // SAT: 3 eixos da AABB
-    if (std::max(v0.x, std::max(v1.x, v2.x)) < -box_half_extents.x || std::min(v0.x, std::min(v1.x, v2.x)) > box_half_extents.x)
-        return false;
-    if (std::max(v0.y, std::max(v1.y, v2.y)) < -box_half_extents.y || std::min(v0.y, std::min(v1.y, v2.y)) > box_half_extents.y)
-        return false;
-    if (std::max(v0.z, std::max(v1.z, v2.z)) < -box_half_extents.z || std::min(v0.z, std::min(v1.z, v2.z)) > box_half_extents.z)
-        return false;
-
-    // SAT: 9 eixos cruzamento aresta-triângulo X eixo-caixa
-    for (int edge_index = 0; edge_index < 3; ++edge_index)
-    {
-        for (int axis_index = 0; axis_index < 3; ++axis_index)
-        {
-            const glm::vec4 axis4 = crossproduct(
-                edges[edge_index],
-                axis_basis[axis_index]);
-            const glm::vec4 axis(axis4.x, axis4.y, axis4.z, 0.0f);
-            if (!OverlapOnAxis(v0, v1, v2, axis, box_half_extents))
-                return false;
-        }
-    }
-
-    // SAT: eixo normal do triângulo
-    const glm::vec4 tri_normal4 = crossproduct(e0, e1);
-    const glm::vec4 tri_normal(tri_normal4.x, tri_normal4.y, tri_normal4.z, 0.0f);
-    if (!OverlapOnAxis(v0, v1, v2, tri_normal, box_half_extents))
-        return false;
-
-    return true;
-}
-
 void BuildCollisionDataFromObjModel(ObjModel *model, glm::mat4 model_matrix)
 {
     g_ScenarioCollisionShapes.clear();
@@ -1334,11 +1251,11 @@ void BuildCollisionDataFromObjModel(ObjModel *model, glm::mat4 model_matrix)
                 const glm::vec4 p = glm::vec4(p_world.x, p_world.y, p_world.z, 1.0f);
 
                 if (vertex == 0)
-                    world_triangle.v0 = p;
-                if (vertex == 1)
                     world_triangle.v1 = p;
-                if (vertex == 2)
+                if (vertex == 1)
                     world_triangle.v2 = p;
+                if (vertex == 2)
+                    world_triangle.v3 = p;
 
                 shape_collision.bbox_min.x = std::min(shape_collision.bbox_min.x, p.x);
                 shape_collision.bbox_min.y = std::min(shape_collision.bbox_min.y, p.y);
@@ -1360,37 +1277,6 @@ void BuildCollisionDataFromObjModel(ObjModel *model, glm::mat4 model_matrix)
 
         g_ScenarioCollisionShapes.push_back(shape_collision);
     }
-}
-
-bool CollidesWithScenarioAabb(const glm::vec4 &center, const glm::vec4 &half_extents)
-{
-    const glm::vec4 cube_min = center - half_extents;
-    const glm::vec4 cube_max = center + half_extents;
-
-    for (size_t shape_index = 0; shape_index < g_ScenarioCollisionShapes.size(); ++shape_index)
-    {
-        const CollisionShape &shape = g_ScenarioCollisionShapes[shape_index];
-
-        // Broad phase: filtra apenas formas com sobreposição de AABB.
-        CollisionAABB box_aabb = {cube_min, cube_max};
-        CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
-        if (!AabbAabbIntersect(box_aabb, shape_aabb))
-            continue;
-
-        // Narrow phase: testa triângulo-a-triângulo (AABB do cubo vs triângulo).
-        for (size_t triangle_index = 0; triangle_index < shape.triangles.size(); ++triangle_index)
-        {
-            if (TriangleIntersectsAabb(shape.triangles[triangle_index], center, half_extents))
-                return true;
-        }
-    }
-
-    return false;
-}
-
-bool CollidesWithScenario(const glm::vec4 &cube_center)
-{
-    return CollidesWithScenarioAabb(cube_center, g_PlayerCubeHalfExtents);
 }
 
 glm::vec4 ComputeCameraPositionWithCollision(const glm::vec4 &lookat_position, const glm::vec4 &desired_camera_position)
@@ -1419,7 +1305,7 @@ glm::vec4 ComputeCameraPositionWithCollision(const glm::vec4 &lookat_position, c
             for (size_t triangle_index = 0; triangle_index < shape.triangles.size(); ++triangle_index)
             {
                 const Triangle &tri = shape.triangles[triangle_index];
-                CollisionTriangle col_tri = {tri.v0, tri.v1, tri.v2};
+                CollisionTriangle col_tri = {tri.v1, tri.v2, tri.v3};
                 float t_tri;
                 if (RayTriangleIntersect(ray, col_tri, t_tri) && t_tri < closest_t)
                 {
