@@ -48,6 +48,7 @@
 // Headers locais, definidos na pasta "include/"
 #include "utils.h"
 #include "matrices.h"
+    #include "collision.h"
 
 // Estrutura que representa um modelo geométrico carregado a partir de um
 // arquivo ".obj". Veja https://en.wikipedia.org/wiki/Wavefront_.obj_file .
@@ -1224,15 +1225,6 @@ void BuildUnitCubeAndAddToVirtualScene(const char *object_name)
     glBindVertexArray(0);
 }
 
-static bool AabbIntersects(
-    const glm::vec4 &min_a, const glm::vec4 &max_a,
-    const glm::vec4 &min_b, const glm::vec4 &max_b)
-{
-    return min_a.x <= max_b.x && max_a.x >= min_b.x &&
-           min_a.y <= max_b.y && max_a.y >= min_b.y &&
-           min_a.z <= max_b.z && max_a.z >= min_b.z;
-}
-
 static bool OverlapOnAxis(
     const glm::vec4 &v0,
     const glm::vec4 &v1,
@@ -1380,7 +1372,9 @@ bool CollidesWithScenarioAabb(const glm::vec4 &center, const glm::vec4 &half_ext
         const CollisionShape &shape = g_ScenarioCollisionShapes[shape_index];
 
         // Broad phase: filtra apenas formas com sobreposição de AABB.
-        if (!AabbIntersects(cube_min, cube_max, shape.bbox_min, shape.bbox_max))
+        CollisionAABB box_aabb = {cube_min, cube_max};
+        CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
+        if (!AabbAabbIntersect(box_aabb, shape_aabb))
             continue;
 
         // Narrow phase: testa triângulo-a-triângulo (AABB do cubo vs triângulo).
@@ -1401,20 +1395,47 @@ bool CollidesWithScenario(const glm::vec4 &cube_center)
 
 glm::vec4 ComputeCameraPositionWithCollision(const glm::vec4 &lookat_position, const glm::vec4 &desired_camera_position)
 {
-    // Busca a posição mais distante possível da câmera ao longo do segmento
-    // lookat -> desired, respeitando colisão com o cenário.
-    const int steps = 36;
-    const glm::vec4 ray = desired_camera_position - lookat_position;
+    glm::vec4 direction = desired_camera_position - lookat_position;
+    float max_t = norm(direction);
+    if (max_t < 0.0001f)
+        return desired_camera_position;
 
-    for (int i = steps; i >= 0; --i)
+    glm::vec4 direction_normalized = direction / max_t;
+    CollisionRay ray = {lookat_position, direction_normalized};
+
+    float closest_t = max_t;
+    bool hit = false;
+
+    for (size_t shape_index = 0; shape_index < g_ScenarioCollisionShapes.size(); ++shape_index)
     {
-        const float t = static_cast<float>(i) / static_cast<float>(steps);
-        const glm::vec4 candidate = lookat_position + ray * t;
-        if (!CollidesWithScenarioAabb(candidate, g_CameraCollisionHalfExtents))
-            return candidate;
+        const CollisionShape &shape = g_ScenarioCollisionShapes[shape_index];
+        CollisionAABB aabb = {shape.bbox_min, shape.bbox_max};
+        float t_aabb;
+
+        // Broad phase: Ray vs AABB
+        if (RayAabbIntersect(ray, aabb, t_aabb) && t_aabb <= closest_t)
+        {
+            // Narrow phase: Ray vs Triangle
+            for (size_t triangle_index = 0; triangle_index < shape.triangles.size(); ++triangle_index)
+            {
+                const Triangle &tri = shape.triangles[triangle_index];
+                CollisionTriangle col_tri = {tri.v0, tri.v1, tri.v2};
+                float t_tri;
+                if (RayTriangleIntersect(ray, col_tri, t_tri) && t_tri < closest_t)
+                {
+                    closest_t = t_tri;
+                    hit = true;
+                }
+            }
+        }
     }
 
-    return lookat_position;
+    if (hit)
+    {
+        return lookat_position + direction_normalized * std::max(0.0f, closest_t - 0.1f);
+    }
+
+    return desired_camera_position;
 }
 
 // Carrega um Vertex Shader de um arquivo GLSL. Veja definição de LoadShader() abaixo.
