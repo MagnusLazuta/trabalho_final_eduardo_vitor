@@ -497,9 +497,9 @@ int main()
         const float turn_speed = 2.1f;
 
         if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-            g_PlayerYaw += turn_speed * delta_time;
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
             g_PlayerYaw -= turn_speed * delta_time;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+            g_PlayerYaw += turn_speed * delta_time;
 
         const glm::vec4 player_back(std::sin(g_PlayerYaw), 0.0f, -std::cos(g_PlayerYaw), 0.0f);
         const glm::vec4 player_forward = -player_back;
@@ -654,9 +654,10 @@ int main()
         glFrontFace(GL_CCW);
 
         // Desenhamos o modelo visual do personagem principal.
+
         glDisable(GL_CULL_FACE);
-        model = Matrix_Translate(g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z) * Matrix_Rotate_Y(g_PlayerYaw) * Matrix_Scale(player_model_scale, player_model_scale, player_model_scale) * Matrix_Translate(-player_model_center.x, -player_model_center.y, -player_model_center.z);
-        glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+        model = Matrix_Translate(g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z) * Matrix_Rotate_Y(-g_PlayerYaw) * Matrix_Scale(player_model_scale, player_model_scale, player_model_scale) * Matrix_Translate(-player_model_center.x, -player_model_center.y, -player_model_center.z);
+        glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));    
         glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
         glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
         for (size_t i = 0; i < player_model_object_names.size(); ++i)
