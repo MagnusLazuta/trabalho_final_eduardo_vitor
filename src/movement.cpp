@@ -54,24 +54,31 @@ float UpdatePlayerMovement(GLFWwindow* window, float delta_time)
     // slide movement
     glm::vec4 updated_position = g_PlayerCubePosition;
 
+    // Altura de "degrau" ou margem para evitar que o chão bloqueie o movimento horizontal
+    const float horizontal_test_margin = 0.1f;
+    glm::vec4 h_half_extents = g_PlayerCubeHalfExtents;
+    h_half_extents.y -= horizontal_test_margin / 2.0f;
+
     glm::vec4 test_position_x = updated_position;
     test_position_x.x += intended_move.x;
+    test_position_x.y += horizontal_test_margin / 2.0f;
 
     if (!CollidesWithScenario(
             test_position_x,
             g_ScenarioCollisionShapes,
-            g_PlayerCubeHalfExtents))
+            h_half_extents))
     {
         updated_position.x = test_position_x.x;
     }
 
     glm::vec4 test_position_z = updated_position;
     test_position_z.z += intended_move.z;
+    test_position_z.y += horizontal_test_margin / 2.0f;
 
     if (!CollidesWithScenario(
             test_position_z,
             g_ScenarioCollisionShapes,
-            g_PlayerCubeHalfExtents))
+            h_half_extents))
     {
         updated_position.z = test_position_z.z;
     }

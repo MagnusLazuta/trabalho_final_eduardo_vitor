@@ -451,6 +451,10 @@ int main()
     const float player_model_scale = (player_model_max_dimension > 1e-6f) ? (1.7f / player_model_max_dimension) : 1.0f;
 
     // Alinha collision.obj ao espaço do map.obj (centro + escala).
+    // NOTA: Esta lógica automática foi desabilitada pois estava causando desalinhamento
+    // (colisões invisíveis) quando o modelo de colisão tinha dimensões diferentes do mapa.
+    const glm::mat4 collision_alignment = Matrix_Identity();
+/*
     const glm::vec4 map_center = (map_bbox_min + map_bbox_max) * 0.5f;
     const glm::vec4 map_size = map_bbox_max - map_bbox_min;
     const glm::vec4 collision_center = (collision_bbox_min + collision_bbox_max) * 0.5f;
@@ -467,6 +471,7 @@ int main()
         Matrix_Translate(map_center.x, map_center.y, map_center.z) *
         Matrix_Scale(collision_uniform_scale, collision_uniform_scale, collision_uniform_scale) *
         Matrix_Translate(-collision_center.x, -collision_center.y, -collision_center.z);
+*/
 
     // Construímos os dados usados pelo sistema de colisão.
     BuildCollisionDataFromObjModel(&scenario_collision_model, GetScenarioModelMatrix() * collision_alignment);

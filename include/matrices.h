@@ -27,6 +27,7 @@
 //
 // Para conseguirmos definir matrizes através de suas LINHAS, a função Matrix()
 // computa a transposta usando os elementos passados por parâmetros.
+
 inline glm::mat4 Matrix(
     float m00, float m01, float m02, float m03, // LINHA 1
     float m10, float m11, float m12, float m13, // LINHA 2

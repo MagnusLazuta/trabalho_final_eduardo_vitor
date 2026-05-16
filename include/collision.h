@@ -41,7 +41,7 @@ bool RayAabbIntersect(CollisionRay r, CollisionAABB a, float &t);
 // Narrow Phase: Ray vs Triangle
 bool RayTriangleIntersect(CollisionRay r, CollisionTriangle tri, float &t);
 
-bool CollidesWithScenarioAabb(const glm::vec4 &center, const glm::vec4 &half_extents);
+bool CollidesWithScenarioAabb(const glm::vec4 &center, const glm::vec4 &half_extents, const std::vector<CollisionShape> &g_ScenarioCollisionShapes);
 
 bool CollidesWithScenario(const glm::vec4 &cube_center, const std::vector<CollisionShape> &g_ScenarioCollisionShapes, const glm::vec4 &g_PlayerCubeHalfExtents);
 
