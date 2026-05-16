@@ -50,6 +50,8 @@
 #include "matrices.h"
 #include "collision.h"
 #include "types.h"
+#include "globals.h"
+#include "movement.h"
 
 // Estrutura que representa um modelo geométrico carregado a partir de um
 // arquivo ".obj". Veja https://en.wikipedia.org/wiki/Wavefront_.obj_file .
@@ -182,7 +184,9 @@ std::map<std::string, SceneObject> g_VirtualScene;
 // Pilha que guardará as matrizes de modelagem.
 std::stack<glm::mat4> g_MatrixStack;
 std::vector<std::string> g_ScenarioObjectNames;
-static std::vector<CollisionShape> g_ScenarioCollisionShapes;
+
+// Declaração desta variável foram movidas para globals.h 
+//static std::vector<CollisionShape> g_ScenarioCollisionShapes;
 
 glm::vec4 g_ScenarioBoundsMin = glm::vec4(+std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), 1.0f);
 glm::vec4 g_ScenarioBoundsMax = glm::vec4(-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), 1.0f);
@@ -191,11 +195,13 @@ glm::mat4 g_ScenarioModelMatrix = Matrix_Identity();
 const char *g_SceneMapPath = "../../assets/scenes/scene00/map.obj";
 const char *g_SceneCollisionPath = "../../assets/scenes/scene00/collision.obj";
 
-static glm::vec4 g_PlayerCubeHalfExtents(0.30f, 0.30f, 0.30f, 0.0f);
-static glm::vec4 g_PlayerCubePosition(0.0f, 0.0f, 0.0f, 1.0f);
+// Declaração destas variáveis foram movidas para globals.h 
+//static glm::vec4 g_PlayerCubeHalfExtents(0.30f, 0.30f, 0.30f, 0.0f);
+//static glm::vec4 g_PlayerCubePosition(0.0f, 0.0f, 0.0f, 1.0f);
+//static float g_PlayerYaw = 0.0f;
+//static bool g_PlayerCubeColliding = false;
+
 static const glm::vec4 g_HardcodedTestSpawnPosition(2.46f, 4.80f, 1.28f, 1.0f);
-static float g_PlayerYaw = 0.0f;
-static bool g_PlayerCubeColliding = false;
 
 // Razão de proporção da janela (largura/altura). Veja função FramebufferSizeCallback().
 float g_ScreenRatio = 1.0f;
@@ -491,49 +497,9 @@ int main()
         const float delta_time = static_cast<float>(current_frame_time - previous_frame_time);
         previous_frame_time = current_frame_time;
 
-        // Movimentação do personagem: W/S para frente/trás, A/D para girar.
-        glm::vec4 intended_move(0.0f, 0.0f, 0.0f, 0.0f);
-        const float move_speed = 3.5f;
-        const float turn_speed = 2.1f;
-
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-            g_PlayerYaw -= turn_speed * delta_time;
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-            g_PlayerYaw += turn_speed * delta_time;
-
-        const glm::vec4 player_back(std::sin(g_PlayerYaw), 0.0f, -std::cos(g_PlayerYaw), 0.0f);
-        const glm::vec4 player_forward = -player_back;
-
-        float move_input = 0.0f;
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-            move_input += 1.0f;
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-            move_input -= 1.0f;
-        intended_move = player_forward * (move_input * move_speed * delta_time);
-
-        // Tentamos mover por eixo para permitir "slide" na parede.
-        glm::vec4 updated_position = g_PlayerCubePosition;
-
-        glm::vec4 test_position_x = updated_position;
-        test_position_x.x += intended_move.x;
-        if (!CollidesWithScenario(test_position_x, g_ScenarioCollisionShapes, g_PlayerCubeHalfExtents))
-        {
-            updated_position.x = test_position_x.x;
-        }
-
-        glm::vec4 test_position_z = updated_position;
-        test_position_z.z += intended_move.z;
-        if (!CollidesWithScenario(test_position_z, g_ScenarioCollisionShapes, g_PlayerCubeHalfExtents))
-        {
-            updated_position.z = test_position_z.z;
-        }
-
-        g_PlayerCubePosition = updated_position;
-        g_PlayerCubeColliding = CollidesWithScenario(g_PlayerCubePosition, g_ScenarioCollisionShapes, g_PlayerCubeHalfExtents);
-
-        glfwSetWindowTitle(
-            window,
-            g_PlayerCubeColliding ? "INF01047 - Colisao: DETECTADA | Movimento: W/S + rotacao A/D | Camera: 3a pessoa" : "INF01047 - Colisao: livre | Movimento: W/S + rotacao A/D | Camera: 3a pessoa");
+        // // Movimentação do personagem: W/S para frente/trás, A/D para girar.
+        // Retorna direção do movimento para utilização na rotação da câmera.
+        float move_input = UpdatePlayerMovement(window, delta_time);
 
         // Aqui executamos as operações de renderização
 

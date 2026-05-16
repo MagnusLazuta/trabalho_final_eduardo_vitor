@@ -9,4 +9,6 @@ struct Triangle
     glm::vec4 v3;
 };
 
+
+
 #endif
