@@ -53,6 +53,8 @@
 #include "globals.h"
 #include "movement.h"
 
+GLuint LoadTextureImage(const char *filename); // Função que carrega imagens de textura
+
 // Estrutura que representa um modelo geométrico carregado a partir de um
 // arquivo ".obj". Veja https://en.wikipedia.org/wiki/Wavefront_.obj_file .
 struct ObjModel
@@ -60,6 +62,7 @@ struct ObjModel
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
+    std::vector<GLuint> material_texture_ids;
 
     // Este construtor lê o modelo de um arquivo utilizando a biblioteca tinyobjloader.
     // Veja: https://github.com/syoyo/tinyobjloader
@@ -107,6 +110,22 @@ struct ObjModel
             printf("- Objeto '%s'\n", shapes[shape].name.c_str());
         }
 
+        printf("Carregando as texturas...\n");
+        for (size_t i = 0; i < materials.size(); i++)
+        {
+            if (!materials[i].diffuse_texname.empty())
+            {
+                std::string textpath = std::string(basepath) + materials[i].diffuse_texname;
+                GLuint texture_id = LoadTextureImage(textpath.c_str());
+                material_texture_ids.push_back(texture_id);
+            }
+            else
+            {
+                printf("Sem textura\n");
+                material_texture_ids.push_back(0);
+            }
+        }
+
         printf("OK.\n");
     }
 };
@@ -120,7 +139,6 @@ void PopMatrix(glm::mat4 &M);
 void BuildTrianglesAndAddToVirtualScene(ObjModel *);                          // Constrói representação de um ObjModel como malha de triângulos para renderização
 void ComputeNormals(ObjModel *model);                                         // Computa normais de um ObjModel, caso não existam.
 void LoadShadersFromFiles();                                                  // Carrega os shaders de vértice e fragmento, criando um programa de GPU
-void LoadTextureImage(const char *filename);                                  // Função que carrega imagens de textura
 void DrawVirtualObject(const char *object_name);                              // Desenha um objeto armazenado em g_VirtualScene
 GLuint LoadShader_Vertex(const char *filename);                               // Carrega um vertex shader
 GLuint LoadShader_Fragment(const char *filename);                             // Carrega um fragment shader
@@ -171,6 +189,7 @@ struct SceneObject
     GLuint vertex_array_object_id; // ID do VAO onde estão armazenados os atributos do modelo
     glm::vec4 bbox_min;            // Axis-Aligned Bounding Box do objeto
     glm::vec4 bbox_max;
+    GLuint texture_id; // ID da textura a ser utilizada para renderizar o objeto, ou 0 para não utilizar textura
 };
 
 // Abaixo definimos variáveis globais utilizadas em várias funções do código.
@@ -180,13 +199,14 @@ struct SceneObject
 // objetos dentro da variável g_VirtualScene, e veja na função main() como
 // estes são acessados.
 std::map<std::string, SceneObject> g_VirtualScene;
+static std::map<std::string, GLuint> g_LoadedTexturesCache;
 
 // Pilha que guardará as matrizes de modelagem.
 std::stack<glm::mat4> g_MatrixStack;
 std::vector<std::string> g_ScenarioObjectNames;
 
-// Declaração desta variável foram movidas para globals.h 
-//static std::vector<CollisionShape> g_ScenarioCollisionShapes;
+// Declaração desta variável foram movidas para globals.h
+// static std::vector<CollisionShape> g_ScenarioCollisionShapes;
 
 glm::vec4 g_ScenarioBoundsMin = glm::vec4(+std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), 1.0f);
 glm::vec4 g_ScenarioBoundsMax = glm::vec4(-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), 1.0f);
@@ -195,11 +215,11 @@ glm::mat4 g_ScenarioModelMatrix = Matrix_Identity();
 const char *g_SceneMapPath = "../../assets/scenes/scene00/map.obj";
 const char *g_SceneCollisionPath = "../../assets/scenes/scene00/collision.obj";
 
-// Declaração destas variáveis foram movidas para globals.h 
-//static glm::vec4 g_PlayerCubeHalfExtents(0.30f, 0.30f, 0.30f, 0.0f);
-//static glm::vec4 g_PlayerCubePosition(0.0f, 0.0f, 0.0f, 1.0f);
-//static float g_PlayerYaw = 0.0f;
-//static bool g_PlayerCubeColliding = false;
+// Declaração destas variáveis foram movidas para globals.h
+// static glm::vec4 g_PlayerCubeHalfExtents(0.30f, 0.30f, 0.30f, 0.0f);
+// static glm::vec4 g_PlayerCubePosition(0.0f, 0.0f, 0.0f, 1.0f);
+// static float g_PlayerYaw = 0.0f;
+// static bool g_PlayerCubeColliding = false;
 
 static const glm::vec4 g_HardcodedTestSpawnPosition(2.46f, 4.80f, 1.28f, 1.0f);
 
@@ -454,24 +474,24 @@ int main()
     // NOTA: Esta lógica automática foi desabilitada pois estava causando desalinhamento
     // (colisões invisíveis) quando o modelo de colisão tinha dimensões diferentes do mapa.
     const glm::mat4 collision_alignment = Matrix_Identity();
-/*
-    const glm::vec4 map_center = (map_bbox_min + map_bbox_max) * 0.5f;
-    const glm::vec4 map_size = map_bbox_max - map_bbox_min;
-    const glm::vec4 collision_center = (collision_bbox_min + collision_bbox_max) * 0.5f;
-    const glm::vec4 collision_size = collision_bbox_max - collision_bbox_min;
+    /*
+        const glm::vec4 map_center = (map_bbox_min + map_bbox_max) * 0.5f;
+        const glm::vec4 map_size = map_bbox_max - map_bbox_min;
+        const glm::vec4 collision_center = (collision_bbox_min + collision_bbox_max) * 0.5f;
+        const glm::vec4 collision_size = collision_bbox_max - collision_bbox_min;
 
-    const float sx = (std::fabs(collision_size.x) > 1e-6f) ? (map_size.x / collision_size.x) : 1.0f;
-    const float sy = (std::fabs(collision_size.y) > 1e-6f) ? (map_size.y / collision_size.y) : 1.0f;
-    const float sz = (std::fabs(collision_size.z) > 1e-6f) ? (map_size.z / collision_size.z) : 1.0f;
-    float collision_uniform_scale = (sx + sy + sz) / 3.0f;
-    if (!std::isfinite(collision_uniform_scale) || collision_uniform_scale <= 0.0f)
-        collision_uniform_scale = 1.0f;
+        const float sx = (std::fabs(collision_size.x) > 1e-6f) ? (map_size.x / collision_size.x) : 1.0f;
+        const float sy = (std::fabs(collision_size.y) > 1e-6f) ? (map_size.y / collision_size.y) : 1.0f;
+        const float sz = (std::fabs(collision_size.z) > 1e-6f) ? (map_size.z / collision_size.z) : 1.0f;
+        float collision_uniform_scale = (sx + sy + sz) / 3.0f;
+        if (!std::isfinite(collision_uniform_scale) || collision_uniform_scale <= 0.0f)
+            collision_uniform_scale = 1.0f;
 
-    const glm::mat4 collision_alignment =
-        Matrix_Translate(map_center.x, map_center.y, map_center.z) *
-        Matrix_Scale(collision_uniform_scale, collision_uniform_scale, collision_uniform_scale) *
-        Matrix_Translate(-collision_center.x, -collision_center.y, -collision_center.z);
-*/
+        const glm::mat4 collision_alignment =
+            Matrix_Translate(map_center.x, map_center.y, map_center.z) *
+            Matrix_Scale(collision_uniform_scale, collision_uniform_scale, collision_uniform_scale) *
+            Matrix_Translate(-collision_center.x, -collision_center.y, -collision_center.z);
+    */
 
     // Construímos os dados usados pelo sistema de colisão.
     BuildCollisionDataFromObjModel(&scenario_collision_model, GetScenarioModelMatrix() * collision_alignment);
@@ -544,7 +564,7 @@ int main()
             g_CameraSmoothedPosition = desired_camera_world;
             g_CameraInitialized = true;
         }
-        
+
         g_CameraSmoothedPosition = SmoothFollowVec4(
             g_CameraSmoothedPosition,
             desired_camera_world,
@@ -628,7 +648,7 @@ int main()
 
         glDisable(GL_CULL_FACE);
         model = Matrix_Translate(g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z) * Matrix_Rotate_Y(-g_PlayerYaw) * Matrix_Scale(player_model_scale, player_model_scale, player_model_scale) * Matrix_Translate(-player_model_center.x, -player_model_center.y, -player_model_center.z);
-        glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));    
+        glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
         glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
         glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
         for (size_t i = 0; i < player_model_object_names.size(); ++i)
@@ -673,9 +693,14 @@ int main()
 }
 
 // Função que carrega uma imagem para ser utilizada como textura
-void LoadTextureImage(const char *filename)
+GLuint LoadTextureImage(const char *filename)
 {
     printf("Carregando imagem \"%s\"... ", filename);
+
+    if (g_LoadedTexturesCache.find(filename) != g_LoadedTexturesCache.end())
+    {
+        return g_LoadedTexturesCache[filename];
+    }
 
     // Primeiro fazemos a leitura da imagem do disco
     stbi_set_flip_vertically_on_load(true);
@@ -713,7 +738,7 @@ void LoadTextureImage(const char *filename)
     glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
 
     GLuint textureunit = g_NumLoadedTextures;
-    glActiveTexture(GL_TEXTURE0 + textureunit);
+    glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texture_id);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
     glGenerateMipmap(GL_TEXTURE_2D);
@@ -722,6 +747,9 @@ void LoadTextureImage(const char *filename)
     stbi_image_free(data);
 
     g_NumLoadedTextures += 1;
+
+    g_LoadedTexturesCache[filename] = texture_id;
+    return texture_id;
 }
 
 // Função que desenha um objeto armazenado em g_VirtualScene. Veja definição
@@ -732,6 +760,13 @@ void DrawVirtualObject(const char *object_name)
     // vértices apontados pelo VAO criado pela função BuildTrianglesAndAddToVirtualScene(). Veja
     // comentários detalhados dentro da definição de BuildTrianglesAndAddToVirtualScene().
     glBindVertexArray(g_VirtualScene[object_name].vertex_array_object_id);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, g_VirtualScene[object_name].texture_id);
+
+    GLint texture_unit_location = glGetUniformLocation(g_GpuProgramID, "TextureImage0");
+
+    glUniform1i(texture_unit_location, 0);
 
     // Setamos as variáveis "bbox_min" e "bbox_max" do fragment shader
     // com os parâmetros da axis-aligned bounding box (AABB) do modelo.
@@ -1028,6 +1063,16 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel *model)
         theobject.num_indices = last_index - first_index + 1; // Número de indices
         theobject.rendering_mode = GL_TRIANGLES;              // Índices correspondem ao tipo de rasterização GL_TRIANGLES.
         theobject.vertex_array_object_id = vertex_array_object_id;
+
+        int material_id = model->shapes[shape].mesh.material_ids[0];
+        if (material_id >= 0)
+        {
+            theobject.texture_id = model->material_texture_ids[material_id];
+        }
+        else
+        {
+            theobject.texture_id = 0; // Sem textura
+        }
 
         theobject.bbox_min = bbox_min;
         theobject.bbox_max = bbox_max;

@@ -139,7 +139,7 @@ void main()
     }
     else if ( object_id == SCENARIO )
     {
-        Kd0 = vec3(0.55, 0.55, 0.62);
+        Kd0 = texture(TextureImage0, texcoords).rgb;
     }
     else if ( object_id == PLAYER_CUBE )
     {
