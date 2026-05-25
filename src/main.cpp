@@ -302,7 +302,7 @@ static std::string ResolveScene00Path(const char *relative_from_bin, const char 
     return std::string(relative_from_bin);
 }
 
-static float WrapAnglePi(float angle)
+float WrapAnglePi(float angle)
 {
     while (angle > 3.141592f)
         angle -= 2.0f * 3.141592f;
@@ -524,7 +524,7 @@ int main()
 
         // // Movimentação do personagem: W/S para frente/trás, A/D para girar.
         // Retorna direção do movimento para utilização na rotação da câmera.
-        float move_input = UpdatePlayerMovement(window, delta_time);
+        float move_input = UpdatePlayerMovement(window, delta_time, g_CameraYaw);
 
         // Aqui executamos as operações de renderização
 
