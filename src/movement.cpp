@@ -147,10 +147,17 @@ float UpdatePlayerMovement(
         // MOVIMENTO
         // =====================================================
 
+        glm::vec4 player_forward(
+            -std::sin(g_PlayerYaw),
+            0.0f,
+            std::cos(g_PlayerYaw),
+            0.0f
+        );
+
         intended_move =
-            move_dir *
+            player_forward *
             (move_speed * delta_time);
-    }
+        }
 
     // =========================================================
     // GRAVIDADE
