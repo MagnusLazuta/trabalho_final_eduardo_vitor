@@ -541,38 +541,38 @@ int main()
 
         if (g_ThirdPersonCamera)
         {
-        // Câmera third-person estilo Zelda-like:
-        // gira suavemente para alinhar com o personagem e não orbita bruscamente.
-        float camera_target_yaw = g_CameraYaw;
+            // Câmera third-person estilo Zelda-like:
+            // gira suavemente para alinhar com o personagem e não orbita bruscamente.
+            float camera_target_yaw = g_CameraYaw;
 
-        if (std::fabs(move_input) > 1e-4f)
-            camera_target_yaw = g_PlayerYaw;
+            if (std::fabs(move_input) > 1e-4f)
+                camera_target_yaw = g_PlayerYaw;
 
-        g_CameraYaw = SmoothFollowAngle(g_CameraYaw, camera_target_yaw, g_CameraYawFollowSpeed, delta_time);
-        const glm::vec4 camera_back(std::sin(g_CameraYaw), 0.0f, -std::cos(g_CameraYaw), 0.0f);
+            g_CameraYaw = SmoothFollowAngle(g_CameraYaw, camera_target_yaw, g_CameraYawFollowSpeed, delta_time);
+            const glm::vec4 camera_back(std::sin(g_CameraYaw), 0.0f, -std::cos(g_CameraYaw), 0.0f);
 
-        const glm::vec4 camera_lookat_world =
-            g_PlayerCubePosition + camera_back * (g_PlayerCubeHalfExtents.z + 0.18f) + glm::vec4(0.0f, g_ThirdPersonLookAtHeight, 0.0f, 0.0f);
+            const glm::vec4 camera_lookat_world =
+                g_PlayerCubePosition + camera_back * (g_PlayerCubeHalfExtents.z + 0.18f) + glm::vec4(0.0f, g_ThirdPersonLookAtHeight, 0.0f, 0.0f);
 
-        const glm::vec4 desired_camera_world =
-            g_PlayerCubePosition + camera_back * g_ThirdPersonCameraDistance + glm::vec4(0.0f, g_ThirdPersonCameraHeight, 0.0f, 0.0f);
+            const glm::vec4 desired_camera_world =
+                g_PlayerCubePosition + camera_back * g_ThirdPersonCameraDistance + glm::vec4(0.0f, g_ThirdPersonCameraHeight, 0.0f, 0.0f);
 
-        if (!g_CameraInitialized)
-        {
-            g_CameraSmoothedPosition = desired_camera_world;
-            g_CameraInitialized = true;
-        }
+            if (!g_CameraInitialized)
+            {
+                g_CameraSmoothedPosition = desired_camera_world;
+                g_CameraInitialized = true;
+            }
 
-        g_CameraSmoothedPosition = SmoothFollowVec4(
-            g_CameraSmoothedPosition,
-            desired_camera_world,
-            g_CameraPositionFollowSpeed,
-            delta_time);
+            g_CameraSmoothedPosition = SmoothFollowVec4(
+                g_CameraSmoothedPosition,
+                desired_camera_world,
+                g_CameraPositionFollowSpeed,
+                delta_time);
 
-        const glm::vec4 camera_position_world =
-            ComputeCameraPositionWithCollision(camera_lookat_world, g_CameraSmoothedPosition);
-        g_CameraSmoothedPosition = camera_position_world;
-        // Abaixo definimos as varáveis que efetivamente definem a câmera virtual.
+            const glm::vec4 camera_position_world =
+                ComputeCameraPositionWithCollision(camera_lookat_world, g_CameraSmoothedPosition);
+            g_CameraSmoothedPosition = camera_position_world;
+            // Abaixo definimos as varáveis que efetivamente definem a câmera virtual.
             camera_position_c = glm::vec4(camera_position_world.x, camera_position_world.y, camera_position_world.z, 1.0f); // Ponto "c", centro da câmera// Ponto "c", centro da câmera
             camera_lookat_l = glm::vec4(camera_lookat_world.x, camera_lookat_world.y, camera_lookat_world.z, 1.0f);         // Ponto "l", para onde a câmera (look-at) estará olhando
             camera_view_vector = camera_lookat_l - camera_position_c;                                                       // Vetor "view", sentido para onde a câmera está virada
@@ -1538,6 +1538,10 @@ void MouseButtonCallback(GLFWwindow *window, int button, int action, int mods)
         // com o botão esquerdo pressionado.
         glfwGetCursorPos(window, &g_LastCursorPosX, &g_LastCursorPosY);
         g_LeftMouseButtonPressed = true;
+
+        // Inicializamos Theta e Phi a partir do camera_view_vector atual para evitar pulos
+        g_CameraPhi = std::asin(camera_view_vector.y / glm::length(camera_view_vector));
+        g_CameraTheta = std::atan2(-camera_view_vector.x, camera_view_vector.z);
     }
     if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
     {
@@ -1583,68 +1587,30 @@ void MouseButtonCallback(GLFWwindow *window, int button, int action, int mods)
 // cima da janela OpenGL.
 void CursorPosCallback(GLFWwindow *window, double xpos, double ypos)
 {
-    // Abaixo executamos o seguinte: caso o botão esquerdo do mouse esteja
-    // pressionado, computamos quanto que o mouse se movimento desde o último
-    // instante de tempo, e usamos esta movimentação para atualizar os
-    // parâmetros que definem a posição da câmera dentro da cena virtual.
-    // Assim, temos que o usuário consegue controlar a câmera.
+    float dx = xpos - g_LastCursorPosX;
+    float dy = ypos - g_LastCursorPosY;
 
-    if (g_LeftMouseButtonPressed)
+    g_LastCursorPosX = xpos;
+    g_LastCursorPosY = ypos;
+
+    if (g_FirstPersonCamera)
     {
-        // Deslocamento do cursor do mouse em x e y de coordenadas de tela!
-        float dx = xpos - g_LastCursorPosX;
-        float dy = ypos - g_LastCursorPosY;
-
-        // Atualizamos parâmetros da câmera com os deslocamentos
         g_CameraTheta -= 0.01f * dx;
-        g_CameraPhi += 0.01f * dy;
+        g_CameraPhi -= 0.01f * dy;
 
-        // Em coordenadas esféricas, o ângulo phi deve ficar entre -pi/2 e +pi/2.
-        float phimax = 3.141592f / 2;
+        float phimax = 3.141592f / 2 - 0.01f;
         float phimin = -phimax;
 
         if (g_CameraPhi > phimax)
             g_CameraPhi = phimax;
-
         if (g_CameraPhi < phimin)
             g_CameraPhi = phimin;
 
-        // Atualizamos as variáveis globais para armazenar a posição atual do
-        // cursor como sendo a última posição conhecida do cursor.
-        g_LastCursorPosX = xpos;
-        g_LastCursorPosY = ypos;
-    }
+        float vx = -std::sin(g_CameraTheta) * std::cos(g_CameraPhi);
+        float vy = std::sin(g_CameraPhi);
+        float vz = std::cos(g_CameraTheta) * std::cos(g_CameraPhi);
 
-    if (g_RightMouseButtonPressed)
-    {
-        // Deslocamento do cursor do mouse em x e y de coordenadas de tela!
-        float dx = xpos - g_LastCursorPosX;
-        float dy = ypos - g_LastCursorPosY;
-
-        // Atualizamos parâmetros da antebraço com os deslocamentos
-        g_ForearmAngleZ -= 0.01f * dx;
-        g_ForearmAngleX += 0.01f * dy;
-
-        // Atualizamos as variáveis globais para armazenar a posição atual do
-        // cursor como sendo a última posição conhecida do cursor.
-        g_LastCursorPosX = xpos;
-        g_LastCursorPosY = ypos;
-    }
-
-    if (g_MiddleMouseButtonPressed)
-    {
-        // Deslocamento do cursor do mouse em x e y de coordenadas de tela!
-        float dx = xpos - g_LastCursorPosX;
-        float dy = ypos - g_LastCursorPosY;
-
-        // Atualizamos parâmetros da antebraço com os deslocamentos
-        g_TorsoPositionX += 0.01f * dx;
-        g_TorsoPositionY -= 0.01f * dy;
-
-        // Atualizamos as variáveis globais para armazenar a posição atual do
-        // cursor como sendo a última posição conhecida do cursor.
-        g_LastCursorPosX = xpos;
-        g_LastCursorPosY = ypos;
+        camera_view_vector = glm::vec4(vx, vy, vz, 0.0f);
     }
 }
 
