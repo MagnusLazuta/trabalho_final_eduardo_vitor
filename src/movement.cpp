@@ -8,10 +8,10 @@
 #include "types.h"
 #include "globals.h"
 
-const float gravity = -9.8f;      // aceleração
-const float jump_speed = 5.0f;    // pulo
+const float gravity = -9.8f;   // aceleração
+const float jump_speed = 5.0f; // pulo
 
-float UpdatePlayerMovement(GLFWwindow* window, float delta_time)
+float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
 {
     glm::vec4 intended_move(0.0f);
 
@@ -46,7 +46,8 @@ float UpdatePlayerMovement(GLFWwindow* window, float delta_time)
     // aplicar gravidade
     g_PlayerVerticalVelocity += gravity * delta_time;
 
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && g_PlayerOnGround){
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && g_PlayerOnGround)
+    {
         g_PlayerVerticalVelocity = jump_speed;
         g_PlayerOnGround = false;
     }
@@ -112,8 +113,6 @@ float UpdatePlayerMovement(GLFWwindow* window, float delta_time)
 
     glfwSetWindowTitle(
         window,
-        g_PlayerCubeColliding ?
-        "INF01047 - Colisao: DETECTADA" :
-        "INF01047 - Colisao: livre");
+        g_PlayerCubeColliding ? "INF01047 - Colisao: DETECTADA" : "INF01047 - Colisao: livre");
     return move_input;
 }

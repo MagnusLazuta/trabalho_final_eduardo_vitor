@@ -244,6 +244,13 @@ bool g_MiddleMouseButtonPressed = false; // Análogo para botão do meio do mous
 float g_CameraTheta = 0.0f;     // Ângulo no plano ZX em relação ao eixo Z
 float g_CameraPhi = 0.0f;       // Ângulo em relação ao eixo Y
 float g_CameraDistance = 14.0f; // Distância da câmera para a origem
+
+// Variáveis que controlam a
+bool g_FirstPersonCamera = false;
+const float alturaCamera = 0.5f; // Altura da câmera em relação ao chão, utilizada para câmera first-person
+
+// Variáveis que controlam a câmera third-person estilo Zelda-like:
+bool g_ThirdPersonCamera = true;
 float g_ThirdPersonCameraDistance = 3.2f;
 float g_ThirdPersonCameraHeight = 1.4f;
 float g_ThirdPersonLookAtHeight = 0.4f;
@@ -283,6 +290,11 @@ GLuint g_NumLoadedTextures = 0;
 
 const int OBJECT_ID_SCENARIO = 3;
 const int OBJECT_ID_PLAYER_CUBE = 4;
+
+glm::vec4 camera_position_c;
+glm::vec4 camera_lookat_l;
+glm::vec4 camera_view_vector;
+glm::vec4 camera_up_vector;
 
 glm::mat4 GetScenarioModelMatrix()
 {
@@ -474,24 +486,6 @@ int main()
     // NOTA: Esta lógica automática foi desabilitada pois estava causando desalinhamento
     // (colisões invisíveis) quando o modelo de colisão tinha dimensões diferentes do mapa.
     const glm::mat4 collision_alignment = Matrix_Identity();
-    /*
-        const glm::vec4 map_center = (map_bbox_min + map_bbox_max) * 0.5f;
-        const glm::vec4 map_size = map_bbox_max - map_bbox_min;
-        const glm::vec4 collision_center = (collision_bbox_min + collision_bbox_max) * 0.5f;
-        const glm::vec4 collision_size = collision_bbox_max - collision_bbox_min;
-
-        const float sx = (std::fabs(collision_size.x) > 1e-6f) ? (map_size.x / collision_size.x) : 1.0f;
-        const float sy = (std::fabs(collision_size.y) > 1e-6f) ? (map_size.y / collision_size.y) : 1.0f;
-        const float sz = (std::fabs(collision_size.z) > 1e-6f) ? (map_size.z / collision_size.z) : 1.0f;
-        float collision_uniform_scale = (sx + sy + sz) / 3.0f;
-        if (!std::isfinite(collision_uniform_scale) || collision_uniform_scale <= 0.0f)
-            collision_uniform_scale = 1.0f;
-
-        const glm::mat4 collision_alignment =
-            Matrix_Translate(map_center.x, map_center.y, map_center.z) *
-            Matrix_Scale(collision_uniform_scale, collision_uniform_scale, collision_uniform_scale) *
-            Matrix_Translate(-collision_center.x, -collision_center.y, -collision_center.z);
-    */
 
     // Construímos os dados usados pelo sistema de colisão.
     BuildCollisionDataFromObjModel(&scenario_collision_model, GetScenarioModelMatrix() * collision_alignment);
@@ -514,6 +508,7 @@ int main()
     glFrontFace(GL_CCW);
 
     double previous_frame_time = glfwGetTime();
+    bool camera_changed = false;
 
     // Ficamos em um loop infinito, renderizando, até que o usuário feche a ;janela
     while (!glfwWindowShouldClose(window))
@@ -544,9 +539,12 @@ int main()
         // os shaders de vértice e fragmentos).
         glUseProgram(g_GpuProgramID);
 
+        if (g_ThirdPersonCamera)
+        {
         // Câmera third-person estilo Zelda-like:
         // gira suavemente para alinhar com o personagem e não orbita bruscamente.
         float camera_target_yaw = g_CameraYaw;
+
         if (std::fabs(move_input) > 1e-4f)
             camera_target_yaw = g_PlayerYaw;
 
@@ -574,12 +572,22 @@ int main()
         const glm::vec4 camera_position_world =
             ComputeCameraPositionWithCollision(camera_lookat_world, g_CameraSmoothedPosition);
         g_CameraSmoothedPosition = camera_position_world;
-
         // Abaixo definimos as varáveis que efetivamente definem a câmera virtual.
-        glm::vec4 camera_position_c = glm::vec4(camera_position_world.x, camera_position_world.y, camera_position_world.z, 1.0f); // Ponto "c", centro da câmera// Ponto "c", centro da câmera
-        glm::vec4 camera_lookat_l = glm::vec4(camera_lookat_world.x, camera_lookat_world.y, camera_lookat_world.z, 1.0f);         // Ponto "l", para onde a câmera (look-at) estará olhando
-        glm::vec4 camera_view_vector = camera_lookat_l - camera_position_c;                                                       // Vetor "view", sentido para onde a câmera está virada
-        glm::vec4 camera_up_vector = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);                                                           // Vetor "up" fixado para apontar para o "céu" (eito Y global)
+            camera_position_c = glm::vec4(camera_position_world.x, camera_position_world.y, camera_position_world.z, 1.0f); // Ponto "c", centro da câmera// Ponto "c", centro da câmera
+            camera_lookat_l = glm::vec4(camera_lookat_world.x, camera_lookat_world.y, camera_lookat_world.z, 1.0f);         // Ponto "l", para onde a câmera (look-at) estará olhando
+            camera_view_vector = camera_lookat_l - camera_position_c;                                                       // Vetor "view", sentido para onde a câmera está virada
+            camera_up_vector = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);                                                           // Vetor "up" fixado para apontar para o "céu" (eito Y global)
+            camera_changed = false;
+        }
+
+        else if (g_FirstPersonCamera && !camera_changed)
+        {
+            camera_position_c = g_PlayerCubePosition + glm::vec4(0.0f, alturaCamera, 0.0f, 1.0f);
+            camera_view_vector = glm::vec4(-std::sin(g_PlayerYaw), 0.0f, std::cos(g_PlayerYaw), 0.0f);
+            camera_up_vector = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
+
+            camera_changed = !camera_changed;
+        }
 
         if (glm::length(camera_view_vector) <= 0.001f)
         {
@@ -588,9 +596,6 @@ int main()
 
         // Computamos a matriz "View" utilizando os parâmetros da câmera para
         // definir o sistema de coordenadas da câmera.  Veja slides 2-14, 184-190 e 236-242 do documento Aula_08_Sistemas_de_Coordenadas.pdf.
-        PrintVector(camera_position_c);
-        PrintVector(camera_view_vector);
-        PrintVector(camera_up_vector);
         glm::mat4 view = Matrix_Camera_View(camera_position_c, camera_view_vector, camera_up_vector);
 
         // Agora computamos a matriz de Projeção.
@@ -683,6 +688,8 @@ int main()
         // definidas anteriormente usando glfwSet*Callback() serão chamadas
         // pela biblioteca GLFW.
         glfwPollEvents();
+
+        PrintVector(g_PlayerCubePosition);
     }
 
     // Finalizamos o uso dos recursos do sistema operacional
@@ -1567,7 +1574,7 @@ void MouseButtonCallback(GLFWwindow *window, int button, int action, int mods)
     if (button == GLFW_MOUSE_BUTTON_MIDDLE && action == GLFW_RELEASE)
     {
         // Quando o usuário soltar o botão esquerdo do mouse, atualizamos a
-        // variável abaixo para false.
+        // variável abaixo para false.mouse
         g_MiddleMouseButtonPressed = false;
     }
 }
@@ -1710,10 +1717,11 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
         g_TorsoPositionY = 0.0f;
     }
 
-    // Se o usuário apertar a tecla P, utilizamos projeção perspectiva.
+    // Se o usuário apertar a tecla P, mudará o tipo de câmera entre primeira pessoa e terceira pessoa. Veja definição das variáveis globais g_FirstPersonCamera e g_ThirdPersonCamera no início deste arquivo.
     if (key == GLFW_KEY_P && action == GLFW_PRESS)
     {
-        g_UsePerspectiveProjection = true;
+        g_FirstPersonCamera = !g_FirstPersonCamera;
+        g_ThirdPersonCamera = !g_ThirdPersonCamera;
     }
 
     // Se o usuário apertar a tecla O, utilizamos projeção ortográfica.
