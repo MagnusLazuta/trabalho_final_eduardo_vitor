@@ -225,7 +225,7 @@ float g_CameraDistance = 14.0f; // Distância da câmera para a origem
 
 // Variáveis que controlam a
 bool g_FirstPersonCamera = false;
-const float alturaCamera = 1.0f; // Altura da câmera em relação ao chão, utilizada para câmera first-person
+glm::vec4 g_PositionCameraFirstPerson = glm::vec4(-.0f, .4f, .26f, 1.0f);
 
 // Variáveis que controlam a câmera third-person estilo Zelda-like:
 bool g_ThirdPersonCamera = true;
@@ -559,7 +559,12 @@ int main()
 
         else if (g_FirstPersonCamera)
         {
-            camera_position_c = g_PlayerCubePosition + glm::vec4(0.0f, alturaCamera, 0.0f, 1.0f);
+            PrintVector(g_PositionCameraFirstPerson);
+            glm::vec4 offset =
+                Matrix_Rotate_Y(-g_PlayerYaw) *
+                g_PositionCameraFirstPerson;
+
+            camera_position_c = g_PlayerCubePosition + offset;
             camera_view_vector = camera_view_vector;
             camera_up_vector = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
         }
@@ -627,7 +632,9 @@ int main()
         // Desenhamos o modelo visual do personagem principal.
 
         glDisable(GL_CULL_FACE);
+
         model = Matrix_Translate(g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z) * Matrix_Rotate_Y(-g_PlayerYaw) * Matrix_Scale(player_model_scale, player_model_scale, player_model_scale) * Matrix_Translate(-player_model_center.x, -player_model_center.y, -player_model_center.z);
+
         glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
         glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
         glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
@@ -663,8 +670,6 @@ int main()
         // definidas anteriormente usando glfwSet*Callback() serão chamadas
         // pela biblioteca GLFW.
         glfwPollEvents();
-
-        PrintVector(g_PlayerCubePosition);
     }
 
     // Finalizamos o uso dos recursos do sistema operacional
@@ -1570,10 +1575,25 @@ void CursorPosCallback(GLFWwindow *window, double xpos, double ypos)
 
     if (g_FirstPersonCamera)
     {
-        g_CameraTheta -= 0.01f * dx;
+        g_CameraTheta += 0.01f * dx;
         g_CameraPhi -= 0.01f * dy;
 
-        float phimax = 3.141592f / 2 - 0.01f;
+        // limite de diferença câmera/personagem
+        float max_angle = glm::radians(0.01f);
+
+        float angle_diff =
+            WrapAnglePi(g_CameraTheta - g_PlayerYaw);
+
+        if (angle_diff > max_angle)
+        {
+            g_PlayerYaw = g_CameraTheta - max_angle;
+        }
+        else if (angle_diff < -max_angle)
+        {
+            g_PlayerYaw = g_CameraTheta + max_angle;
+        }
+
+        float phimax = glm::pi<float>() / 2.0f - 0.01f;
         float phimin = -phimax;
 
         if (g_CameraPhi > phimax)
@@ -1622,42 +1642,6 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
         glfwSetWindowShouldClose(window, GL_TRUE);
 
-    // O código abaixo implementa a seguinte lógica:
-    //   Se apertar tecla X       então g_AngleX += delta;
-    //   Se apertar tecla shift+X então g_AngleX -= delta;
-    //   Se apertar tecla Y       então g_AngleY += delta;
-    //   Se apertar tecla shift+Y então g_AngleY -= delta;
-    //   Se apertar tecla Z       então g_AngleZ += delta;
-    //   Se apertar tecla shift+Z então g_AngleZ -= delta;
-
-    float delta = 3.141592 / 16; // 22.5 graus, em radianos.
-
-    if (key == GLFW_KEY_X && action == GLFW_PRESS)
-    {
-        g_AngleX += (mod & GLFW_MOD_SHIFT) ? -delta : delta;
-    }
-
-    if (key == GLFW_KEY_Y && action == GLFW_PRESS)
-    {
-        g_AngleY += (mod & GLFW_MOD_SHIFT) ? -delta : delta;
-    }
-    if (key == GLFW_KEY_Z && action == GLFW_PRESS)
-    {
-        g_AngleZ += (mod & GLFW_MOD_SHIFT) ? -delta : delta;
-    }
-
-    // Se o usuário apertar a tecla espaço, resetamos os ângulos de Euler para zero.
-    if (key == GLFW_KEY_SPACE && action == GLFW_PRESS)
-    {
-        g_AngleX = 0.0f;
-        g_AngleY = 0.0f;
-        g_AngleZ = 0.0f;
-        g_ForearmAngleX = 0.0f;
-        g_ForearmAngleZ = 0.0f;
-        g_TorsoPositionX = 0.0f;
-        g_TorsoPositionY = 0.0f;
-    }
-
     // Se o usuário apertar a tecla P, mudará o tipo de câmera entre primeira pessoa e terceira pessoa. Veja definição das variáveis globais g_FirstPersonCamera e g_ThirdPersonCamera no início deste arquivo.
     if (key == GLFW_KEY_P && action == GLFW_PRESS)
     {
@@ -1670,18 +1654,6 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
         }
     }
 
-    // Se o usuário apertar a tecla O, utilizamos projeção ortográfica.
-    if (key == GLFW_KEY_O && action == GLFW_PRESS)
-    {
-        g_UsePerspectiveProjection = false;
-    }
-
-    // Se o usuário apertar a tecla H, fazemos um "toggle" do texto informativo mostrado na tela.
-    if (key == GLFW_KEY_H && action == GLFW_PRESS)
-    {
-        g_ShowInfoText = !g_ShowInfoText;
-    }
-
     // Se o usuário apertar a tecla R, recarregamos os shaders dos arquivos "shader_fragment.glsl" e "shader_vertex.glsl".
     if (key == GLFW_KEY_R && action == GLFW_PRESS)
     {
@@ -1691,11 +1663,18 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
     }
 
     // Atualiza flags de input para movimento
-    if (key == GLFW_KEY_W) g_WPressed = (action != GLFW_RELEASE);
-    if (key == GLFW_KEY_A) g_APressed = (action != GLFW_RELEASE);
-    if (key == GLFW_KEY_S) g_SPressed = (action != GLFW_RELEASE);
-    if (key == GLFW_KEY_D) g_DPressed = (action != GLFW_RELEASE);
-    if (key == GLFW_KEY_SPACE) g_SpacePressed = (action != GLFW_RELEASE);
+    if (g_ThirdPersonCamera)
+    {
+        if (key == GLFW_KEY_W)
+            g_WPressed = (action != GLFW_RELEASE);
+        if (key == GLFW_KEY_A)
+            g_APressed = (action != GLFW_RELEASE);
+        if (key == GLFW_KEY_S)
+            g_SPressed = (action != GLFW_RELEASE);
+        if (key == GLFW_KEY_D)
+            g_DPressed = (action != GLFW_RELEASE);
+        if (key == GLFW_KEY_SPACE)
+            g_SpacePressed = (action != GLFW_RELEASE);
 }
 
 // Definimos o callback para impressão de erros da GLFW no terminal
