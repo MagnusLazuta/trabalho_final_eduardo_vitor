@@ -1,20 +1,4 @@
-//     Universidade Federal do Rio Grande do Sul
-//             Instituto de Informática
-//       Departamento de Informática Aplicada
-//
-//    INF01047 Computação Gráfica e Visualização I
-//               Prof. Eduardo Gastal
-//
-//     CÓDIGO BASE PARA O TRABALHO FINAL
-//
-
-// Arquivos "headers" padrões de C podem ser incluídos em um
-// programa C++, sendo necessário somente adicionar o caractere
-// "c" antes de seu nome, e remover o sufixo ".h". Exemplo:
-//    #include <stdio.h> // Em C
-//  vira
-//    #include <cstdio> // Em C++
-//
+// Headers de C
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -56,7 +40,7 @@
 GLuint LoadTextureImage(const char *filename); // Função que carrega imagens de textura
 
 // Estrutura que representa um modelo geométrico carregado a partir de um
-// arquivo ".obj". Veja https://en.wikipedia.org/wiki/Wavefront_.obj_file .
+// arquivo ".obj".
 struct ObjModel
 {
     tinyobj::attrib_t attrib;
@@ -215,12 +199,6 @@ glm::mat4 g_ScenarioModelMatrix = Matrix_Identity();
 const char *g_SceneMapPath = "../../assets/scenes/scene00/map.obj";
 const char *g_SceneCollisionPath = "../../assets/scenes/scene00/collision.obj";
 
-// Declaração destas variáveis foram movidas para globals.h
-// static glm::vec4 g_PlayerCubeHalfExtents(0.30f, 0.30f, 0.30f, 0.0f);
-// static glm::vec4 g_PlayerCubePosition(0.0f, 0.0f, 0.0f, 1.0f);
-// static float g_PlayerYaw = 0.0f;
-// static bool g_PlayerCubeColliding = false;
-
 static const glm::vec4 g_HardcodedTestSpawnPosition(2.46f, 4.80f, 1.28f, 1.0f);
 
 // Razão de proporção da janela (largura/altura). Veja função FramebufferSizeCallback().
@@ -247,7 +225,7 @@ float g_CameraDistance = 14.0f; // Distância da câmera para a origem
 
 // Variáveis que controlam a
 bool g_FirstPersonCamera = false;
-const float alturaCamera = 0.5f; // Altura da câmera em relação ao chão, utilizada para câmera first-person
+const float alturaCamera = 1.0f; // Altura da câmera em relação ao chão, utilizada para câmera first-person
 
 // Variáveis que controlam a câmera third-person estilo Zelda-like:
 bool g_ThirdPersonCamera = true;
@@ -423,6 +401,7 @@ int main()
     const GLubyte *glversion = glGetString(GL_VERSION);
     const GLubyte *glslversion = glGetString(GL_SHADING_LANGUAGE_VERSION);
 
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     printf("GPU: %s, %s, OpenGL %s, GLSL %s\n", vendor, renderer, glversion, glslversion);
 
     // Carregamos os shaders de vértices e de fragmentos que serão utilizados
@@ -508,7 +487,6 @@ int main()
     glFrontFace(GL_CCW);
 
     double previous_frame_time = glfwGetTime();
-    bool camera_changed = false;
 
     // Ficamos em um loop infinito, renderizando, até que o usuário feche a ;janela
     while (!glfwWindowShouldClose(window))
@@ -577,16 +555,13 @@ int main()
             camera_lookat_l = glm::vec4(camera_lookat_world.x, camera_lookat_world.y, camera_lookat_world.z, 1.0f);         // Ponto "l", para onde a câmera (look-at) estará olhando
             camera_view_vector = camera_lookat_l - camera_position_c;                                                       // Vetor "view", sentido para onde a câmera está virada
             camera_up_vector = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);                                                           // Vetor "up" fixado para apontar para o "céu" (eito Y global)
-            camera_changed = false;
         }
 
-        else if (g_FirstPersonCamera && !camera_changed)
+        else if (g_FirstPersonCamera)
         {
             camera_position_c = g_PlayerCubePosition + glm::vec4(0.0f, alturaCamera, 0.0f, 1.0f);
-            camera_view_vector = glm::vec4(-std::sin(g_PlayerYaw), 0.0f, std::cos(g_PlayerYaw), 0.0f);
+            camera_view_vector = camera_view_vector;
             camera_up_vector = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
-
-            camera_changed = !camera_changed;
         }
 
         if (glm::length(camera_view_vector) <= 0.001f)
@@ -1688,6 +1663,11 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
     {
         g_FirstPersonCamera = !g_FirstPersonCamera;
         g_ThirdPersonCamera = !g_ThirdPersonCamera;
+
+        if (g_FirstPersonCamera)
+        {
+            camera_view_vector = glm::vec4(-std::sin(g_PlayerYaw), 0.0f, std::cos(g_PlayerYaw), 0.0f);
+        }
     }
 
     // Se o usuário apertar a tecla O, utilizamos projeção ortográfica.
