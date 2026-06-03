@@ -1689,6 +1689,13 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
         fprintf(stdout, "Shaders recarregados!\n");
         fflush(stdout);
     }
+
+    // Atualiza flags de input para movimento
+    if (key == GLFW_KEY_W) g_WPressed = (action != GLFW_RELEASE);
+    if (key == GLFW_KEY_A) g_APressed = (action != GLFW_RELEASE);
+    if (key == GLFW_KEY_S) g_SPressed = (action != GLFW_RELEASE);
+    if (key == GLFW_KEY_D) g_DPressed = (action != GLFW_RELEASE);
+    if (key == GLFW_KEY_SPACE) g_SpacePressed = (action != GLFW_RELEASE);
 }
 
 // Definimos o callback para impressão de erros da GLFW no terminal

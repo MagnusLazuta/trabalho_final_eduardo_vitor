@@ -19,10 +19,10 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     const float turn_speed = 2.1f;
 
     // rotation
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+    if (g_APressed)
         g_PlayerYaw -= turn_speed * delta_time;
 
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+    if (g_DPressed)
         g_PlayerYaw += turn_speed * delta_time;
 
     const glm::vec4 player_back(
@@ -33,10 +33,10 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
 
     float move_input = 0.0f;
 
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+    if (g_WPressed)
         move_input += 1.0f;
 
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+    if (g_SPressed)
         move_input -= 1.0f;
 
     intended_move =
@@ -46,7 +46,7 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     // aplicar gravidade
     g_PlayerVerticalVelocity += gravity * delta_time;
 
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && g_PlayerOnGround)
+    if (g_SpacePressed && g_PlayerOnGround)
     {
         g_PlayerVerticalVelocity = jump_speed;
         g_PlayerOnGround = false;
