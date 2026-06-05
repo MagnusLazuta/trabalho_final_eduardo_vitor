@@ -73,6 +73,7 @@ void main()
 
 	// Coeficiente de refletância difusa
 	vec3 Kd0 = vec3(0.7, 0.7, 0.7);
+    float alpha = 1.0;
 
     if ( object_id == SPHERE )
     {
@@ -100,7 +101,9 @@ void main()
         V = (phi + M_PI_2) / M_PI;
 
 		// Obtemos a refletância difusa a partir da leitura da imagem TextureImage0
-		Kd0 = texture(TextureImage0, vec2(U,V)).rgb;
+		vec4 tex_color = texture(TextureImage0, vec2(U,V));
+        Kd0 = tex_color.rgb;
+        alpha = tex_color.a;
     }
     else if ( object_id == BUNNY )
     {
@@ -126,7 +129,9 @@ void main()
         V = (position_model.y - miny) / (maxy - miny);
 
 		// Obtemos a refletância difusa a partir da leitura da imagem TextureImage0
-		Kd0 = texture(TextureImage0, vec2(U,V)).rgb;
+		vec4 tex_color = texture(TextureImage0, vec2(U,V));
+        Kd0 = tex_color.rgb;
+        alpha = tex_color.a;
     }
     else if ( object_id == PLANE )
     {
@@ -135,11 +140,15 @@ void main()
         V = texcoords.y;
 
 		// Obtemos a refletância difusa a partir da leitura da imagem TextureImage1
-		Kd0 = texture(TextureImage1, vec2(U,V)).rgb;
+		vec4 tex_color = texture(TextureImage1, vec2(U,V));
+        Kd0 = tex_color.rgb;
+        alpha = tex_color.a;
     }
     else if ( object_id == SCENARIO )
     {
-        Kd0 = texture(TextureImage0, texcoords).rgb;
+        vec4 tex_color = texture(TextureImage0, texcoords);
+        Kd0 = tex_color.rgb;
+        alpha = tex_color.a;
     }
     else if ( object_id == PLAYER_CUBE )
     {
@@ -149,7 +158,7 @@ void main()
     // Equação de Iluminação
     float lambert = max(0,dot(n,l));
 
-    color.rgb = Kd0 * (lambert + 0.01);
+    color.rgb = Kd0 * (lambert + 0.1);
 
     // NOTE: Se você quiser fazer o rendering de objetos transparentes, é
     // necessário:
@@ -163,9 +172,15 @@ void main()
     //    suas distâncias para a câmera (desenhando primeiro objetos
     //    transparentes que estão mais longe da câmera).
     // Alpha default = 1 = 100% opaco = 0% transparente
-    color.a = 1;
+    color.a = alpha;
+
+    if (color.a < 0.5)
+        discard;
+    
+    // Forçamos alpha = 1 para evitar halos brancos (fringing) nas bordas
+    // provocados pela interpolação linear com o fundo transparente.
+    color.a = 1.0;
 
     // Cor final com correção gamma, considerando monitor sRGB.
-    // Veja https://en.wikipedia.org/w/index.php?title=Gamma_correction&oldid=751281772#Windows.2C_Mac.2C_sRGB_and_TV.2Fvideo_standard_gammas
     color.rgb = pow(color.rgb, vec3(1.0,1.0,1.0)/2.2);
 } 

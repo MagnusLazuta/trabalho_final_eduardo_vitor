@@ -152,6 +152,13 @@ void TextRendering_PrintString(GLFWwindow* window, const std::string &str, float
     float sx = scale / width;
     float sy = scale / height;
 
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    glDepthFunc(GL_ALWAYS);
+    glUseProgram(textprogram_id);
+    glBindVertexArray(textVAO);
+
     for (size_t i = 0; i < str.size(); i++)
     {
         // Find the glyph for the character we are looking for
@@ -187,28 +194,18 @@ void TextRendering_PrintString(GLFWwindow* window, const std::string &str, float
             { x1, y0, s1, t0 }
         };
 
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-        glDepthFunc(GL_ALWAYS);
         glBindBuffer(GL_ARRAY_BUFFER, textVBO);
         glBufferSubData(GL_ARRAY_BUFFER, 0, 24 * sizeof(float), data);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-        glUseProgram(textprogram_id);
-        glBindVertexArray(textVAO);
-
         glDrawArrays(GL_TRIANGLES, 0, 6);
-
-        glBindVertexArray(0);
-        glUseProgram(0);
-        glDepthFunc(GL_LESS);
-
-        glDisable(GL_BLEND);
 
         x += (glyph->advance_x * sx);
     }
+
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glDepthFunc(GL_LESS);
 }
 
 float TextRendering_LineHeight(GLFWwindow* window)

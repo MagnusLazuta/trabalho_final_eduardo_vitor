@@ -174,6 +174,7 @@ struct SceneObject
     glm::vec4 bbox_min;            // Axis-Aligned Bounding Box do objeto
     glm::vec4 bbox_max;
     GLuint texture_id; // ID da textura a ser utilizada para renderizar o objeto, ou 0 para não utilizar textura
+    GLuint sampler_id; // ID do sampler a ser utilizado para a textura
 };
 
 // Abaixo definimos variáveis globais utilizadas em várias funções do código.
@@ -183,7 +184,8 @@ struct SceneObject
 // objetos dentro da variável g_VirtualScene, e veja na função main() como
 // estes são acessados.
 std::map<std::string, SceneObject> g_VirtualScene;
-static std::map<std::string, GLuint> g_LoadedTexturesCache;
+static std::map<std::string, GLuint> g_TextureCache;
+static std::map<std::string, GLuint> g_SamplerCache;
 
 // Pilha que guardará as matrizes de modelagem.
 std::stack<glm::mat4> g_MatrixStack;
@@ -481,6 +483,10 @@ int main()
     // Habilitamos o Z-buffer. Veja slides 104-116 do documento Aula_09_Projecoes.pdf.
     glEnable(GL_DEPTH_TEST);
 
+    // Habilitamos o Blending para transparência
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
     // Habilitamos o Backface Culling. Veja slides 8-13 do documento Aula_02_Fundamentos_Matematicos.pdf, slides 23-34 do documento Aula_13_Clipping_and_Culling.pdf e slides 112-123 do documento Aula_14_Laboratorio_3_Revisao.pdf.
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
@@ -684,9 +690,9 @@ GLuint LoadTextureImage(const char *filename)
 {
     printf("Carregando imagem \"%s\"... ", filename);
 
-    if (g_LoadedTexturesCache.find(filename) != g_LoadedTexturesCache.end())
+    if (g_TextureCache.find(filename) != g_TextureCache.end())
     {
-        return g_LoadedTexturesCache[filename];
+        return g_TextureCache[filename];
     }
 
     // Primeiro fazemos a leitura da imagem do disco
@@ -694,7 +700,7 @@ GLuint LoadTextureImage(const char *filename)
     int width;
     int height;
     int channels;
-    unsigned char *data = stbi_load(filename, &width, &height, &channels, 3);
+    unsigned char *data = stbi_load(filename, &width, &height, &channels, 4);
 
     if (data == NULL)
     {
@@ -711,8 +717,8 @@ GLuint LoadTextureImage(const char *filename)
     glGenSamplers(1, &sampler_id);
 
     // Veja slides 95-96 do documento Aula_20_Mapeamento_de_Texturas.pdf
-    glSamplerParameteri(sampler_id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glSamplerParameteri(sampler_id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glSamplerParameteri(sampler_id, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glSamplerParameteri(sampler_id, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
     // Parâmetros de amostragem da textura.
     glSamplerParameteri(sampler_id, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
@@ -724,18 +730,15 @@ GLuint LoadTextureImage(const char *filename)
     glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
     glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
 
-    GLuint textureunit = g_NumLoadedTextures;
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texture_id);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
     glGenerateMipmap(GL_TEXTURE_2D);
-    glBindSampler(textureunit, sampler_id);
 
     stbi_image_free(data);
 
-    g_NumLoadedTextures += 1;
-
-    g_LoadedTexturesCache[filename] = texture_id;
+    g_TextureCache[filename] = texture_id;
+    g_SamplerCache[filename] = sampler_id;
     return texture_id;
 }
 
@@ -750,6 +753,7 @@ void DrawVirtualObject(const char *object_name)
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, g_VirtualScene[object_name].texture_id);
+    glBindSampler(0, g_VirtualScene[object_name].sampler_id);
 
     GLint texture_unit_location = glGetUniformLocation(g_GpuProgramID, "TextureImage0");
 
@@ -1055,10 +1059,20 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel *model)
         if (material_id >= 0)
         {
             theobject.texture_id = model->material_texture_ids[material_id];
+            // Encontra o sampler correspondente à textura no cache
+            for (auto const &[name, id] : g_TextureCache)
+            {
+                if (id == theobject.texture_id)
+                {
+                    theobject.sampler_id = g_SamplerCache[name];
+                    break;
+                }
+            }
         }
         else
         {
             theobject.texture_id = 0; // Sem textura
+            theobject.sampler_id = 0;
         }
 
         theobject.bbox_min = bbox_min;
