@@ -120,8 +120,8 @@ Ks 0.500000 0.500000 0.500000
 Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
-illum 2dg01_tuta_02_44380.png
-map_Kd 
+illum 2
+map_Kd dg01_tuta_02_44380.png
 
 newmtl dg01_white_59380.004
 Ns 250.000000

@@ -1675,6 +1675,7 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
             g_DPressed = (action != GLFW_RELEASE);
         if (key == GLFW_KEY_SPACE)
             g_SpacePressed = (action != GLFW_RELEASE);
+    }
 }
 
 // Definimos o callback para impressão de erros da GLFW no terminal
