@@ -1252,6 +1252,23 @@ void BuildCollisionDataFromObjModel(ObjModel *model, glm::mat4 model_matrix)
         const size_t num_triangles = model->shapes[shape].mesh.num_face_vertices.size();
         shape_collision.triangles.reserve(num_triangles);
 
+        if (model->shapes[shape].name.find("DOOR") != std::string::npos)
+        {
+            shape_collision.type = CollisionShapeType::DOOR;
+        }
+        else if (model->shapes[shape].name.find("VINES") != std::string::npos)
+        {
+            shape_collision.type = CollisionShapeType::VINES;
+        }
+        else if (model->shapes[shape].name.find("LADDER") != std::string::npos)
+        {
+            shape_collision.type = CollisionShapeType::LADDER;
+        }
+        else
+        {
+            shape_collision.type = CollisionShapeType::SOLID;
+        }
+
         for (size_t triangle = 0; triangle < num_triangles; ++triangle)
         {
             assert(model->shapes[shape].mesh.num_face_vertices[triangle] == 3);
@@ -1676,8 +1693,19 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
         fflush(stdout);
     }
 
+    if (key == GLFW_KEY_O && action == GLFW_PRESS && g_CollidedWithAVine)
+    {
+        g_IsClimbingAVine = !g_IsClimbingAVine;
+        printf("Started climbing vine!\n");
+    }
+    if (key == GLFW_KEY_O && action == GLFW_PRESS && g_CollidedWithALadder)
+    {
+        g_IsClimbingALadder = !g_IsClimbingALadder;
+        printf("Stopped climbing ladder!\n");
+    }
+
     // Atualiza flags de input para movimento
-    if (g_ThirdPersonCamera)
+    if (g_ThirdPersonCamera && !g_IsClimbingALadder && !g_IsClimbingAVine)
     {
         if (key == GLFW_KEY_W)
             g_WPressed = (action != GLFW_RELEASE);
@@ -1690,8 +1718,25 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
         if (key == GLFW_KEY_SPACE)
             g_SpacePressed = (action != GLFW_RELEASE);
     }
+    else if (g_IsClimbingALadder)
+    {
+        if (key == GLFW_KEY_W)
+            g_WPressed = (action != GLFW_RELEASE);
+        if (key == GLFW_KEY_S)
+            g_SPressed = (action != GLFW_RELEASE);
+    }
+    else if (g_IsClimbingAVine)
+    {
+        if (key == GLFW_KEY_W)
+            g_WPressed = (action != GLFW_RELEASE);
+        if (key == GLFW_KEY_S)
+            g_SPressed = (action != GLFW_RELEASE);
+        if (key == GLFW_KEY_A)
+            g_APressed = (action != GLFW_RELEASE);
+        if (key == GLFW_KEY_D)
+            g_DPressed = (action != GLFW_RELEASE);
+    }
 }
-
 // Definimos o callback para impressão de erros da GLFW no terminal
 void ErrorCallback(int error, const char *description)
 {

@@ -25,8 +25,19 @@ struct CollisionAABB
     glm::vec4 max;
 };
 
+enum class CollisionShapeType
+{
+    SOLID,
+    DOOR,
+    NONE,
+    WATER,
+    LADDER,
+    VINES,
+};
+
 struct CollisionShape
 {
+    CollisionShapeType type;
     glm::vec4 bbox_min;
     glm::vec4 bbox_max;
     std::vector<Triangle> triangles;
@@ -41,9 +52,9 @@ bool RayAabbIntersect(CollisionRay r, CollisionAABB a, float &t);
 // Narrow Phase: Ray vs Triangle
 bool RayTriangleIntersect(CollisionRay r, CollisionTriangle tri, float &t);
 
-bool CollidesWithScenarioAabb(const glm::vec4 &center, const glm::vec4 &half_extents, const std::vector<CollisionShape> &g_ScenarioCollisionShapes);
+CollisionShapeType CollidesWithScenarioAabb(const glm::vec4 &center, const glm::vec4 &half_extents, const std::vector<CollisionShape> &g_ScenarioCollisionShapes);
 
-bool CollidesWithScenario(const glm::vec4 &cube_center, const std::vector<CollisionShape> &g_ScenarioCollisionShapes, const glm::vec4 &g_PlayerCubeHalfExtents);
+CollisionShapeType CollidesWithScenario(const glm::vec4 &cube_center, const std::vector<CollisionShape> &g_ScenarioCollisionShapes, const glm::vec4 &g_PlayerCubeHalfExtents);
 
 bool TriangleIntersectsAabb(const Triangle &triangle, const glm::vec4 &box_center, const glm::vec4 &box_half_extents);
 

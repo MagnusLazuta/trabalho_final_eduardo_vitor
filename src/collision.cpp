@@ -88,7 +88,7 @@ bool RayTriangleIntersect(CollisionRay r, CollisionTriangle tri, float &t)
     return false;
 }
 
-bool CollidesWithScenarioAabb(const glm::vec4 &center, const glm::vec4 &half_extents, const std::vector<CollisionShape> &g_ScenarioCollisionShapes)
+CollisionShapeType CollidesWithScenarioAabb(const glm::vec4 &center, const glm::vec4 &half_extents, const std::vector<CollisionShape> &g_ScenarioCollisionShapes)
 {
     const glm::vec4 cube_min = center - half_extents;
     const glm::vec4 cube_max = center + half_extents;
@@ -107,11 +107,11 @@ bool CollidesWithScenarioAabb(const glm::vec4 &center, const glm::vec4 &half_ext
         for (size_t triangle_index = 0; triangle_index < shape.triangles.size(); ++triangle_index)
         {
             if (TriangleIntersectsAabb(shape.triangles[triangle_index], center, half_extents))
-                return true;
+                return shape.type;
         }
     }
 
-    return false;
+    return CollisionShapeType::NONE;
 }
 
 bool TriangleIntersectsAabb(const Triangle &triangle, const glm::vec4 &box_center, const glm::vec4 &box_half_extents)
@@ -163,7 +163,7 @@ bool TriangleIntersectsAabb(const Triangle &triangle, const glm::vec4 &box_cente
     return true;
 }
 
-bool CollidesWithScenario(const glm::vec4 &cube_center, const std::vector<CollisionShape> &g_ScenarioCollisionShapes, const glm::vec4 &g_PlayerCubeHalfExtents)
+CollisionShapeType CollidesWithScenario(const glm::vec4 &cube_center, const std::vector<CollisionShape> &g_ScenarioCollisionShapes, const glm::vec4 &g_PlayerCubeHalfExtents)
 {
     return CollidesWithScenarioAabb(cube_center, g_PlayerCubeHalfExtents, g_ScenarioCollisionShapes);
 }

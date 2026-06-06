@@ -13,6 +13,31 @@ const float jump_speed = 5.0f; // pulo
 
 float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
 {
+    if (g_IsClimbingALadder)
+    {
+        g_PlayerVerticalVelocity = 0.0f; // Anula a gravidade enquanto estiver escalando
+        if (g_WPressed)
+            g_PlayerCubePosition.y += 2.0f * delta_time; // Sobe
+        if (g_SPressed)
+            g_PlayerCubePosition.y -= 2.0f * delta_time; // Desce
+
+        return 0.0f; // Sem movimento horizontal enquanto escalando
+    }
+    else if (g_IsClimbingAVine)
+    {
+        g_PlayerVerticalVelocity = 0.0f; // Anula a gravidade enquanto estiver escalando
+        if (g_WPressed)
+            g_PlayerCubePosition.y += 1.5f * delta_time; // Sobe
+        if (g_SPressed)
+            g_PlayerCubePosition.y -= 1.5f * delta_time; // Desce
+        if (g_APressed)
+            g_PlayerCubePosition.x -= 1.5f * delta_time; // Move para a esquerda
+        if (g_DPressed)
+            g_PlayerCubePosition.x += 1.5f * delta_time; // Move para a direita
+
+        return 0.0f; // Sem movimento horizontal enquanto escalando
+    }
+
     glm::vec4 intended_move(0.0f);
 
     const float move_speed = 3.5f;
@@ -64,10 +89,12 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     test_position_x.x += intended_move.x;
     test_position_x.y += horizontal_test_margin / 2.0f;
 
-    if (!CollidesWithScenario(
-            test_position_x,
-            g_ScenarioCollisionShapes,
-            h_half_extents))
+    CollisionShapeType collision_type_x = CollidesWithScenario(
+        test_position_x,
+        g_ScenarioCollisionShapes,
+        h_half_extents);
+
+    if (collision_type_x == CollisionShapeType::NONE)
     {
         updated_position.x = test_position_x.x;
     }
@@ -76,10 +103,12 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     test_position_z.z += intended_move.z;
     test_position_z.y += horizontal_test_margin / 2.0f;
 
-    if (!CollidesWithScenario(
-            test_position_z,
-            g_ScenarioCollisionShapes,
-            h_half_extents))
+    CollisionShapeType collision_type_z = CollidesWithScenario(
+        test_position_z,
+        g_ScenarioCollisionShapes,
+        h_half_extents);
+
+    if (collision_type_z == CollisionShapeType::NONE)
     {
         updated_position.z = test_position_z.z;
     }
@@ -88,10 +117,12 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     glm::vec4 test_position_y = updated_position;
     test_position_y.y += g_PlayerVerticalVelocity * delta_time;
 
-    if (!CollidesWithScenario(
-            test_position_y,
-            g_ScenarioCollisionShapes,
-            g_PlayerCubeHalfExtents))
+    CollisionShapeType collision_type_y = CollidesWithScenario(
+        test_position_y,
+        g_ScenarioCollisionShapes,
+        g_PlayerCubeHalfExtents);
+
+    if (collision_type_y == CollisionShapeType::NONE)
     {
         updated_position.y = test_position_y.y;
         g_PlayerOnGround = false;
@@ -105,14 +136,26 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
 
     g_PlayerCubePosition = updated_position;
 
-    g_PlayerCubeColliding =
-        CollidesWithScenario(
-            g_PlayerCubePosition,
-            g_ScenarioCollisionShapes,
-            g_PlayerCubeHalfExtents);
+    if (collision_type_x == CollisionShapeType::VINES || collision_type_y == CollisionShapeType::VINES || collision_type_z == CollisionShapeType::VINES)
+    {
+        g_CollidedWithAVine = true;
+    }
+    else if (collision_type_x == CollisionShapeType::LADDER || collision_type_y == CollisionShapeType::LADDER || collision_type_z == CollisionShapeType::LADDER)
+    {
+        g_CollidedWithALadder = true;
+    }
+    else
+    {
+        g_CollidedWithAVine = false;
+        g_CollidedWithALadder = false;
+    }
+
+    printf(g_CollidedWithAVine ? "Colidiu com videira!\n" : "Não colidiu com videira.\n");
+    printf(g_CollidedWithALadder ? "Colidiu com escada!\n" : "Não colidiu com escada.\n");
 
     glfwSetWindowTitle(
         window,
         g_PlayerCubeColliding ? "INF01047 - Colisao: DETECTADA" : "INF01047 - Colisao: livre");
+
     return move_input;
 }
