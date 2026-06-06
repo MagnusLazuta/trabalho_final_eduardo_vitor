@@ -168,6 +168,68 @@ CollisionShapeType CollidesWithScenario(const glm::vec4 &cube_center, const std:
     return CollidesWithScenarioAabb(cube_center, g_PlayerCubeHalfExtents, g_ScenarioCollisionShapes);
 }
 
+bool IsCollidingWithType(const glm::vec4 &center, const glm::vec4 &half_extents, const std::vector<CollisionShape> &g_ScenarioCollisionShapes, CollisionShapeType type)
+{
+    const glm::vec4 cube_min = center - half_extents;
+    const glm::vec4 cube_max = center + half_extents;
+
+    for (size_t shape_index = 0; shape_index < g_ScenarioCollisionShapes.size(); ++shape_index)
+    {
+        const CollisionShape &shape = g_ScenarioCollisionShapes[shape_index];
+        if (shape.type != type)
+            continue;
+
+        CollisionAABB box_aabb = {cube_min, cube_max};
+        CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
+        if (!AabbAabbIntersect(box_aabb, shape_aabb))
+            continue;
+
+        for (size_t triangle_index = 0; triangle_index < shape.triangles.size(); ++triangle_index)
+        {
+            if (TriangleIntersectsAabb(shape.triangles[triangle_index], center, half_extents))
+                return true;
+        }
+    }
+    return false;
+}
+
+bool GetVinesNormal(const glm::vec4 &center, const glm::vec4 &half_extents, const std::vector<CollisionShape> &g_ScenarioCollisionShapes, glm::vec4 &out_normal)
+{
+    const glm::vec4 cube_min = center - half_extents;
+    const glm::vec4 cube_max = center + half_extents;
+
+    for (size_t shape_index = 0; shape_index < g_ScenarioCollisionShapes.size(); ++shape_index)
+    {
+        const CollisionShape &shape = g_ScenarioCollisionShapes[shape_index];
+        if (shape.type != CollisionShapeType::VINES)
+            continue;
+
+        CollisionAABB box_aabb = {cube_min, cube_max};
+        CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
+        if (!AabbAabbIntersect(box_aabb, shape_aabb))
+            continue;
+
+        for (size_t triangle_index = 0; triangle_index < shape.triangles.size(); ++triangle_index)
+        {
+            const Triangle &triangle = shape.triangles[triangle_index];
+            if (TriangleIntersectsAabb(triangle, center, half_extents))
+            {
+                glm::vec4 e1 = triangle.v2 - triangle.v1;
+                glm::vec4 e2 = triangle.v3 - triangle.v1;
+                glm::vec4 n = crossproduct(e1, e2);
+                float len = std::sqrt(dotproduct(n, n));
+                if (len > 1e-6f)
+                {
+                    out_normal = n / len;
+                    out_normal.w = 0.0f;
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 static bool OverlapOnAxis(
     const glm::vec4 &v0,
     const glm::vec4 &v1,

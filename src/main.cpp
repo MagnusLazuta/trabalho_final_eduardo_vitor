@@ -294,7 +294,7 @@ static std::string ResolveScene00Path(const char *relative_from_bin, const char 
     return std::string(relative_from_bin);
 }
 
-static float WrapAnglePi(float angle)
+float WrapAnglePi(float angle)
 {
     while (angle > 3.141592f)
         angle -= 2.0f * 3.141592f;
@@ -303,7 +303,7 @@ static float WrapAnglePi(float angle)
     return angle;
 }
 
-static float SmoothFollowAngle(float current, float target, float speed, float dt)
+float SmoothFollowAngle(float current, float target, float speed, float dt)
 {
     const float alpha = 1.0f - std::exp(-speed * dt);
     const float delta = WrapAnglePi(target - current);
@@ -1696,46 +1696,31 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
     if (key == GLFW_KEY_O && action == GLFW_PRESS && g_CollidedWithAVine)
     {
         g_IsClimbingAVine = !g_IsClimbingAVine;
-        printf("Started climbing vine!\n");
+        if (g_IsClimbingAVine)
+            printf("Started climbing vine!\n");
+        else
+            printf("Stopped climbing vine!\n");
     }
     if (key == GLFW_KEY_O && action == GLFW_PRESS && g_CollidedWithALadder)
     {
         g_IsClimbingALadder = !g_IsClimbingALadder;
-        printf("Stopped climbing ladder!\n");
+        if (g_IsClimbingALadder)
+            printf("Started climbing ladder!\n");
+        else
+            printf("Stopped climbing ladder!\n");
     }
 
     // Atualiza flags de input para movimento
-    if (g_ThirdPersonCamera && !g_IsClimbingALadder && !g_IsClimbingAVine)
-    {
-        if (key == GLFW_KEY_W)
-            g_WPressed = (action != GLFW_RELEASE);
-        if (key == GLFW_KEY_A)
-            g_APressed = (action != GLFW_RELEASE);
-        if (key == GLFW_KEY_S)
-            g_SPressed = (action != GLFW_RELEASE);
-        if (key == GLFW_KEY_D)
-            g_DPressed = (action != GLFW_RELEASE);
-        if (key == GLFW_KEY_SPACE)
-            g_SpacePressed = (action != GLFW_RELEASE);
-    }
-    else if (g_IsClimbingALadder)
-    {
-        if (key == GLFW_KEY_W)
-            g_WPressed = (action != GLFW_RELEASE);
-        if (key == GLFW_KEY_S)
-            g_SPressed = (action != GLFW_RELEASE);
-    }
-    else if (g_IsClimbingAVine)
-    {
-        if (key == GLFW_KEY_W)
-            g_WPressed = (action != GLFW_RELEASE);
-        if (key == GLFW_KEY_S)
-            g_SPressed = (action != GLFW_RELEASE);
-        if (key == GLFW_KEY_A)
-            g_APressed = (action != GLFW_RELEASE);
-        if (key == GLFW_KEY_D)
-            g_DPressed = (action != GLFW_RELEASE);
-    }
+    if (key == GLFW_KEY_W)
+        g_WPressed = (action != GLFW_RELEASE);
+    if (key == GLFW_KEY_A)
+        g_APressed = (action != GLFW_RELEASE);
+    if (key == GLFW_KEY_S)
+        g_SPressed = (action != GLFW_RELEASE);
+    if (key == GLFW_KEY_D)
+        g_DPressed = (action != GLFW_RELEASE);
+    if (key == GLFW_KEY_SPACE)
+        g_SpacePressed = (action != GLFW_RELEASE);
 }
 // Definimos o callback para impressão de erros da GLFW no terminal
 void ErrorCallback(int error, const char *description)

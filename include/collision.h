@@ -56,6 +56,10 @@ CollisionShapeType CollidesWithScenarioAabb(const glm::vec4 &center, const glm::
 
 CollisionShapeType CollidesWithScenario(const glm::vec4 &cube_center, const std::vector<CollisionShape> &g_ScenarioCollisionShapes, const glm::vec4 &g_PlayerCubeHalfExtents);
 
+bool IsCollidingWithType(const glm::vec4 &center, const glm::vec4 &half_extents, const std::vector<CollisionShape> &g_ScenarioCollisionShapes, CollisionShapeType type);
+
+bool GetVinesNormal(const glm::vec4 &center, const glm::vec4 &half_extents, const std::vector<CollisionShape> &g_ScenarioCollisionShapes, glm::vec4 &out_normal);
+
 bool TriangleIntersectsAabb(const Triangle &triangle, const glm::vec4 &box_center, const glm::vec4 &box_half_extents);
 
 static bool OverlapOnAxis(
