@@ -270,6 +270,7 @@ GLuint g_NumLoadedTextures = 0;
 
 const int OBJECT_ID_SCENARIO = 3;
 const int OBJECT_ID_PLAYER_CUBE = 4;
+const int OBJECT_ID_SPHERE = 0;
 
 glm::vec4 camera_position_c;
 glm::vec4 camera_lookat_l;
@@ -314,6 +315,75 @@ static glm::vec4 SmoothFollowVec4(const glm::vec4 &current, const glm::vec4 &tar
 {
     const float alpha = 1.0f - std::exp(-speed * dt);
     return current + (target - current) * alpha;
+}
+
+static glm::vec4 EvaluateBezierCurve(
+    const glm::vec4 &p0,
+    const glm::vec4 &p1,
+    const glm::vec4 &p2,
+    const glm::vec4 &p3,
+    float t)
+{
+    const float one_minus_t = 1.0f - t;
+    const float b0 = one_minus_t * one_minus_t * one_minus_t;
+    const float b1 = 3.0f * one_minus_t * one_minus_t * t;
+    const float b2 = 3.0f * one_minus_t * t * t;
+    const float b3 = t * t * t;
+    return b0 * p0 + b1 * p1 + b2 * p2 + b3 * p3;
+}
+
+static glm::vec4 ComputeFairyOffset(float orbit_progress)
+{
+    const float pi = 3.141592f;
+    const float half_pi = pi / 2.0f;
+    const float radius = 0.85f;
+    const float wave_amplitude = 0.4f;
+    const float vertical_wave_frequency = 3.0f;
+    const float tangent_scale = 0.55228475f * radius;
+    const float angle_step = half_pi;
+    const float y_tangent_scale = wave_amplitude * angle_step / 3.0f;
+
+    const float wrapped_progress = orbit_progress - std::floor(orbit_progress);
+    const float segment_progress = wrapped_progress * 4.0f;
+    const int segment_index = static_cast<int>(segment_progress) % 4;
+    const float local_t = segment_progress - static_cast<float>(segment_index);
+
+    const float angle_start = segment_index * angle_step;
+    const float angle_end = angle_start + angle_step;
+
+    const glm::vec4 p0(
+        radius * std::cos(angle_start),
+        wave_amplitude * std::sin(vertical_wave_frequency * angle_start),
+        radius * std::sin(angle_start),
+        0.0f);
+    const glm::vec4 p3(
+        radius * std::cos(angle_end),
+        wave_amplitude * std::sin(vertical_wave_frequency * angle_end),
+        radius * std::sin(angle_end),
+        0.0f);
+
+    const glm::vec4 tangent_start(
+        -std::sin(angle_start),
+        vertical_wave_frequency * std::cos(vertical_wave_frequency * angle_start),
+        std::cos(angle_start),
+        0.0f);
+    const glm::vec4 tangent_end(
+        -std::sin(angle_end),
+        vertical_wave_frequency * std::cos(vertical_wave_frequency * angle_end),
+        std::cos(angle_end),
+        0.0f);
+
+    glm::vec4 p1 = p0;
+    p1.x += tangent_scale * tangent_start.x;
+    p1.y += y_tangent_scale * tangent_start.y;
+    p1.z += tangent_scale * tangent_start.z;
+
+    glm::vec4 p2 = p3;
+    p2.x -= tangent_scale * tangent_end.x;
+    p2.y -= y_tangent_scale * tangent_end.y;
+    p2.z -= tangent_scale * tangent_end.z;
+
+    return EvaluateBezierCurve(p0, p1, p2, p3, local_t);
 }
 
 void ComputeObjBounds(ObjModel *model, glm::vec4 &bbox_min, glm::vec4 &bbox_max)
@@ -418,6 +488,7 @@ int main()
     const std::string scene_map_path = ResolveScene00Path(g_SceneMapPath, "assets/scenes/scene00/map.obj");
     const std::string scene_collision_path = ResolveScene00Path(g_SceneCollisionPath, "assets/scenes/scene00/collision.obj");
     const std::string player_model_path = ResolveScene00Path("../../assets/char/childlink_v2.obj", "assets/char/childlink_v2.obj");
+    const std::string fairy_model_path = ResolveScene00Path("../../data/sphere.obj", "data/sphere.obj");
 
     // Carregamos o mapa da cena para renderização.
     ObjModel scenario_map_model(scene_map_path.c_str());
@@ -462,6 +533,25 @@ int main()
     const glm::vec4 player_model_size = player_model_bbox_max - player_model_bbox_min;
     const float player_model_max_dimension = std::max(player_model_size.x, std::max(player_model_size.y, player_model_size.z));
     const float player_model_scale = (player_model_max_dimension > 1e-6f) ? (1.7f / player_model_max_dimension) : 1.0f;
+
+    // Carregamos o modelo provisório da fada.
+    ObjModel fairy_model(fairy_model_path.c_str());
+    ComputeNormals(&fairy_model);
+    BuildTrianglesAndAddToVirtualScene(&fairy_model);
+    glm::vec4 fairy_model_bbox_min, fairy_model_bbox_max;
+    ComputeObjBounds(&fairy_model, fairy_model_bbox_min, fairy_model_bbox_max);
+
+    std::vector<std::string> fairy_model_object_names;
+    fairy_model_object_names.reserve(fairy_model.shapes.size());
+    for (size_t i = 0; i < fairy_model.shapes.size(); ++i)
+    {
+        fairy_model_object_names.push_back(fairy_model.shapes[i].name);
+    }
+
+    const glm::vec4 fairy_model_center = (fairy_model_bbox_min + fairy_model_bbox_max) * 0.5f;
+    const glm::vec4 fairy_model_size = fairy_model_bbox_max - fairy_model_bbox_min;
+    const float fairy_model_max_dimension = std::max(fairy_model_size.x, std::max(fairy_model_size.y, fairy_model_size.z));
+    const float fairy_model_scale = (fairy_model_max_dimension > 1e-6f) ? (0.22f / fairy_model_max_dimension) : 1.0f;
 
     // Alinha collision.obj ao espaço do map.obj (centro + escala).
     // NOTA: Esta lógica automática foi desabilitada pois estava causando desalinhamento
@@ -647,6 +737,25 @@ int main()
         for (size_t i = 0; i < player_model_object_names.size(); ++i)
         {
             DrawVirtualObject(player_model_object_names[i].c_str());
+        }
+
+        const float fairy_orbit_period = 5.2f;
+        const float fairy_head_height = 1.1f;
+        const float fairy_orbit_progress = std::fmod(static_cast<float>(current_frame_time) / fairy_orbit_period, 1.0f);
+        const glm::vec4 fairy_head_center = g_PlayerCubePosition + glm::vec4(0.0f, fairy_head_height, 0.0f, 0.0f);
+        const glm::vec4 fairy_world_position = fairy_head_center + ComputeFairyOffset(fairy_orbit_progress);
+
+        model =
+            Matrix_Translate(fairy_world_position.x, fairy_world_position.y, fairy_world_position.z) *
+            Matrix_Scale(fairy_model_scale, fairy_model_scale, fairy_model_scale) *
+            Matrix_Translate(-fairy_model_center.x, -fairy_model_center.y, -fairy_model_center.z);
+
+        glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+        glUniform1i(g_object_id_uniform, OBJECT_ID_SPHERE);
+        glUniform1i(g_cube_colliding_uniform, 0);
+        for (size_t i = 0; i < fairy_model_object_names.size(); ++i)
+        {
+            DrawVirtualObject(fairy_model_object_names[i].c_str());
         }
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
