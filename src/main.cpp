@@ -332,16 +332,30 @@ static glm::vec4 EvaluateBezierCurve(
     return b0 * p0 + b1 * p1 + b2 * p2 + b3 * p3;
 }
 
-static glm::vec4 ComputeFairyOffset(float orbit_progress)
+struct FairyMotionParams
+{
+    float orbit_radius;
+    float orbit_period_seconds;
+    float vertical_oscillations_per_circle;
+    float vertical_oscillation_amplitude;
+    float head_height_offset;
+};
+
+static const FairyMotionParams g_FairyMotionParams = {
+    0.75f, // orbit_radius
+    6.0f,  // orbit_period_seconds
+    9.0f,  // vertical_oscillations_per_circle
+    0.05f, // vertical_oscillation_amplitude
+    1.0f  // head_height_offset
+};
+
+static glm::vec4 ComputeFairyOffset(float orbit_progress, const FairyMotionParams &params)
 {
     const float pi = 3.141592f;
     const float half_pi = pi / 2.0f;
-    const float radius = 0.85f;
-    const float wave_amplitude = 0.4f;
-    const float vertical_wave_frequency = 3.0f;
+    const float radius = params.orbit_radius;
     const float tangent_scale = 0.55228475f * radius;
     const float angle_step = half_pi;
-    const float y_tangent_scale = wave_amplitude * angle_step / 3.0f;
 
     const float wrapped_progress = orbit_progress - std::floor(orbit_progress);
     const float segment_progress = wrapped_progress * 4.0f;
@@ -353,37 +367,40 @@ static glm::vec4 ComputeFairyOffset(float orbit_progress)
 
     const glm::vec4 p0(
         radius * std::cos(angle_start),
-        wave_amplitude * std::sin(vertical_wave_frequency * angle_start),
+        0.0f,
         radius * std::sin(angle_start),
         0.0f);
     const glm::vec4 p3(
         radius * std::cos(angle_end),
-        wave_amplitude * std::sin(vertical_wave_frequency * angle_end),
+        0.0f,
         radius * std::sin(angle_end),
         0.0f);
 
     const glm::vec4 tangent_start(
         -std::sin(angle_start),
-        vertical_wave_frequency * std::cos(vertical_wave_frequency * angle_start),
+        0.0f,
         std::cos(angle_start),
         0.0f);
     const glm::vec4 tangent_end(
         -std::sin(angle_end),
-        vertical_wave_frequency * std::cos(vertical_wave_frequency * angle_end),
+        0.0f,
         std::cos(angle_end),
         0.0f);
 
     glm::vec4 p1 = p0;
     p1.x += tangent_scale * tangent_start.x;
-    p1.y += y_tangent_scale * tangent_start.y;
     p1.z += tangent_scale * tangent_start.z;
 
     glm::vec4 p2 = p3;
     p2.x -= tangent_scale * tangent_end.x;
-    p2.y -= y_tangent_scale * tangent_end.y;
     p2.z -= tangent_scale * tangent_end.z;
 
-    return EvaluateBezierCurve(p0, p1, p2, p3, local_t);
+    glm::vec4 fairy_offset = EvaluateBezierCurve(p0, p1, p2, p3, local_t);
+    fairy_offset.y =
+        params.vertical_oscillation_amplitude *
+        std::sin(2.0f * pi * params.vertical_oscillations_per_circle * wrapped_progress);
+
+    return fairy_offset;
 }
 
 void ComputeObjBounds(ObjModel *model, glm::vec4 &bbox_min, glm::vec4 &bbox_max)
@@ -739,11 +756,9 @@ int main()
             DrawVirtualObject(player_model_object_names[i].c_str());
         }
 
-        const float fairy_orbit_period = 5.2f;
-        const float fairy_head_height = 1.1f;
-        const float fairy_orbit_progress = std::fmod(static_cast<float>(current_frame_time) / fairy_orbit_period, 1.0f);
-        const glm::vec4 fairy_head_center = g_PlayerCubePosition + glm::vec4(0.0f, fairy_head_height, 0.0f, 0.0f);
-        const glm::vec4 fairy_world_position = fairy_head_center + ComputeFairyOffset(fairy_orbit_progress);
+        const float fairy_orbit_progress = std::fmod(static_cast<float>(current_frame_time) / g_FairyMotionParams.orbit_period_seconds, 1.0f);
+        const glm::vec4 fairy_head_center = g_PlayerCubePosition + glm::vec4(0.0f, g_FairyMotionParams.head_height_offset, 0.0f, 0.0f);
+        const glm::vec4 fairy_world_position = fairy_head_center + ComputeFairyOffset(fairy_orbit_progress, g_FairyMotionParams);
 
         model =
             Matrix_Translate(fairy_world_position.x, fairy_world_position.y, fairy_world_position.z) *
