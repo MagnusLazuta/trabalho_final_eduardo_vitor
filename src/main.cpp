@@ -227,7 +227,7 @@ float g_CameraDistance = 14.0f; // Distância da câmera para a origem
 
 // Variáveis que controlam a
 bool g_FirstPersonCamera = false;
-glm::vec4 g_PositionCameraFirstPerson = glm::vec4(-.0f, .4f, .26f, 1.0f);
+glm::vec4 g_PositionCameraFirstPerson = glm::vec4(-.0f, .4f, .26f, 0.0f);
 
 // Variáveis que controlam a câmera third-person estilo Zelda-like:
 bool g_ThirdPersonCamera = true;
@@ -271,11 +271,58 @@ GLuint g_NumLoadedTextures = 0;
 const int OBJECT_ID_SCENARIO = 3;
 const int OBJECT_ID_PLAYER_CUBE = 4;
 const int OBJECT_ID_SPHERE = 0;
+const int OBJECT_ID_PROJECTILE = 5;
 
 glm::vec4 camera_position_c;
 glm::vec4 camera_lookat_l;
 glm::vec4 camera_view_vector;
 glm::vec4 camera_up_vector;
+
+struct SlingshotState
+{
+    bool is_charging;
+    bool fire_requested;
+    float charge_time_seconds;
+    float queued_charge_ratio;
+    float max_charge_time_seconds;
+};
+
+struct ProjectileState
+{
+    bool is_active;
+    glm::vec4 position;
+    glm::vec4 direction;
+    float speed;
+    float radius;
+    float lifetime_seconds;
+    float max_lifetime_seconds;
+};
+
+enum class ProjectileCollisionTarget
+{
+    NONE,
+    SCENARIO,
+    ENEMY,
+    INTERACTIVE_OBJECT
+};
+
+struct ProjectileCollisionResult
+{
+    ProjectileCollisionTarget target;
+    CollisionShapeType scenario_shape_type;
+    int enemy_index;
+    int object_index;
+};
+
+SlingshotState g_SlingshotState = {false, false, 0.0f, 0.0f, 1.0f};
+ProjectileState g_SlingshotProjectile = {
+    false,
+    glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),
+    glm::vec4(0.0f, 0.0f, 1.0f, 0.0f),
+    0.0f,
+    0.08f,
+    0.0f,
+    3.0f};
 
 glm::mat4 GetScenarioModelMatrix()
 {
@@ -330,6 +377,111 @@ static glm::vec4 EvaluateBezierCurve(
     const float b2 = 3.0f * one_minus_t * t * t;
     const float b3 = t * t * t;
     return b0 * p0 + b1 * p1 + b2 * p2 + b3 * p3;
+}
+
+static float Clamp01(float value)
+{
+    return std::max(0.0f, std::min(1.0f, value));
+}
+
+static glm::vec4 ComputeFirstPersonCameraOffset()
+{
+    return Matrix_Rotate_Y(-g_PlayerYaw) * g_PositionCameraFirstPerson;
+}
+
+static float GetSlingshotPullAmount()
+{
+    return Clamp01(g_SlingshotState.charge_time_seconds / g_SlingshotState.max_charge_time_seconds);
+}
+
+static glm::vec4 ComputeProjectileSpawnPosition(const glm::vec4 &camera_position, const glm::vec4 &view_direction)
+{
+    return camera_position + 0.35f * view_direction;
+}
+
+static void BeginSlingshotCharge()
+{
+    g_SlingshotState.is_charging = true;
+    g_SlingshotState.fire_requested = false;
+    g_SlingshotState.charge_time_seconds = 0.0f;
+    g_SlingshotState.queued_charge_ratio = 0.0f;
+}
+
+static void QueueSlingshotShot()
+{
+    g_SlingshotState.is_charging = false;
+    g_SlingshotState.fire_requested = true;
+    g_SlingshotState.queued_charge_ratio = GetSlingshotPullAmount();
+    g_SlingshotState.charge_time_seconds = 0.0f;
+}
+
+static ProjectileCollisionResult QueryProjectileEnemyCollision(const ProjectileState &projectile)
+{
+    (void)projectile;
+    return {ProjectileCollisionTarget::NONE, CollisionShapeType::NONE, -1, -1};
+}
+
+static ProjectileCollisionResult QueryProjectileInteractiveCollision(const ProjectileState &projectile)
+{
+    (void)projectile;
+    return {ProjectileCollisionTarget::NONE, CollisionShapeType::NONE, -1, -1};
+}
+
+static ProjectileCollisionResult QueryProjectileCollision(const ProjectileState &projectile)
+{
+    const glm::vec4 projectile_half_extents(projectile.radius, projectile.radius, projectile.radius, 0.0f);
+    const CollisionShapeType scenario_hit =
+        CollidesWithScenario(projectile.position, g_ScenarioCollisionShapes, projectile_half_extents);
+
+    if (scenario_hit == CollisionShapeType::SOLID || scenario_hit == CollisionShapeType::DOOR)
+    {
+        return {ProjectileCollisionTarget::SCENARIO, scenario_hit, -1, -1};
+    }
+
+    const ProjectileCollisionResult enemy_hit = QueryProjectileEnemyCollision(projectile);
+    if (enemy_hit.target != ProjectileCollisionTarget::NONE)
+        return enemy_hit;
+
+    return QueryProjectileInteractiveCollision(projectile);
+}
+
+static void FireSlingshotProjectile(const glm::vec4 &camera_position, const glm::vec4 &view_direction)
+{
+    const float charge_ratio = g_SlingshotState.queued_charge_ratio;
+    const float min_projectile_speed = 10.0f;
+    const float max_projectile_speed = 24.0f;
+
+    g_SlingshotProjectile.is_active = true;
+    g_SlingshotProjectile.position = ComputeProjectileSpawnPosition(camera_position, view_direction);
+    g_SlingshotProjectile.direction = view_direction;
+    g_SlingshotProjectile.speed =
+        min_projectile_speed + (max_projectile_speed - min_projectile_speed) * charge_ratio;
+    g_SlingshotProjectile.lifetime_seconds = 0.0f;
+
+    g_SlingshotState.fire_requested = false;
+    g_SlingshotState.queued_charge_ratio = 0.0f;
+}
+
+static void UpdateSlingshotProjectile(float delta_time)
+{
+    if (!g_SlingshotProjectile.is_active)
+        return;
+
+    g_SlingshotProjectile.position +=
+        g_SlingshotProjectile.direction * (g_SlingshotProjectile.speed * delta_time);
+    g_SlingshotProjectile.lifetime_seconds += delta_time;
+
+    if (g_SlingshotProjectile.lifetime_seconds >= g_SlingshotProjectile.max_lifetime_seconds)
+    {
+        g_SlingshotProjectile.is_active = false;
+        return;
+    }
+
+    const ProjectileCollisionResult hit_result = QueryProjectileCollision(g_SlingshotProjectile);
+    if (hit_result.target != ProjectileCollisionTarget::NONE)
+    {
+        g_SlingshotProjectile.is_active = false;
+    }
 }
 
 struct FairyMotionParams
@@ -610,6 +762,13 @@ int main()
 
         // // Movimentação do personagem: W/S para frente/trás, A/D para girar.
         // Retorna direção do movimento para utilização na rotação da câmera.
+        if (g_SlingshotState.is_charging)
+        {
+            g_SlingshotState.charge_time_seconds += delta_time;
+            g_SlingshotState.charge_time_seconds =
+                std::min(g_SlingshotState.charge_time_seconds, g_SlingshotState.max_charge_time_seconds);
+        }
+
         float move_input = UpdatePlayerMovement(window, delta_time);
 
         // Aqui executamos as operações de renderização
@@ -673,9 +832,7 @@ int main()
         else if (g_FirstPersonCamera)
         {
             PrintVector(g_PositionCameraFirstPerson);
-            glm::vec4 offset =
-                Matrix_Rotate_Y(-g_PlayerYaw) *
-                g_PositionCameraFirstPerson;
+            glm::vec4 offset = ComputeFirstPersonCameraOffset();
 
             camera_position_c = g_PlayerCubePosition + offset;
             camera_view_vector = camera_view_vector;
@@ -689,6 +846,19 @@ int main()
 
         // Computamos a matriz "View" utilizando os parâmetros da câmera para
         // definir o sistema de coordenadas da câmera.  Veja slides 2-14, 184-190 e 236-242 do documento Aula_08_Sistemas_de_Coordenadas.pdf.
+        const float camera_view_length = glm::length(camera_view_vector);
+        const glm::vec4 projectile_view_direction =
+            (camera_view_length > 0.001f)
+                ? camera_view_vector / camera_view_length
+                : glm::vec4(0.0f, 0.0f, -1.0f, 0.0f);
+
+        if (g_SlingshotState.fire_requested && g_FirstPersonCamera)
+        {
+            FireSlingshotProjectile(camera_position_c, projectile_view_direction);
+        }
+
+        UpdateSlingshotProjectile(delta_time);
+
         glm::mat4 view = Matrix_Camera_View(camera_position_c, camera_view_vector, camera_up_vector);
 
         // Agora computamos a matriz de Projeção.
@@ -771,6 +941,22 @@ int main()
         for (size_t i = 0; i < fairy_model_object_names.size(); ++i)
         {
             DrawVirtualObject(fairy_model_object_names[i].c_str());
+        }
+
+        if (g_SlingshotProjectile.is_active)
+        {
+            model =
+                Matrix_Translate(g_SlingshotProjectile.position.x, g_SlingshotProjectile.position.y, g_SlingshotProjectile.position.z) *
+                Matrix_Scale(g_SlingshotProjectile.radius, g_SlingshotProjectile.radius, g_SlingshotProjectile.radius) *
+                Matrix_Translate(-fairy_model_center.x, -fairy_model_center.y, -fairy_model_center.z);
+
+            glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+            glUniform1i(g_object_id_uniform, OBJECT_ID_PROJECTILE);
+            glUniform1i(g_cube_colliding_uniform, 0);
+            for (size_t i = 0; i < fairy_model_object_names.size(); ++i)
+            {
+                DrawVirtualObject(fairy_model_object_names[i].c_str());
+            }
         }
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
@@ -1677,12 +1863,22 @@ void MouseButtonCallback(GLFWwindow *window, int button, int action, int mods)
         // Inicializamos Theta e Phi a partir do camera_view_vector atual para evitar pulos
         g_CameraPhi = std::asin(camera_view_vector.y / glm::length(camera_view_vector));
         g_CameraTheta = std::atan2(-camera_view_vector.x, camera_view_vector.z);
+
+        if (g_FirstPersonCamera)
+        {
+            BeginSlingshotCharge();
+        }
     }
     if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
     {
         // Quando o usuário soltar o botão esquerdo do mouse, atualizamos a
         // variável abaixo para false.
         g_LeftMouseButtonPressed = false;
+
+        if (g_FirstPersonCamera && g_SlingshotState.is_charging)
+        {
+            QueueSlingshotShot();
+        }
     }
     if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS)
     {
@@ -1806,6 +2002,13 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
         if (g_FirstPersonCamera)
         {
             camera_view_vector = glm::vec4(-std::sin(g_PlayerYaw), 0.0f, std::cos(g_PlayerYaw), 0.0f);
+        }
+        else
+        {
+            g_SlingshotState.is_charging = false;
+            g_SlingshotState.fire_requested = false;
+            g_SlingshotState.charge_time_seconds = 0.0f;
+            g_SlingshotState.queued_charge_ratio = 0.0f;
         }
     }
 
