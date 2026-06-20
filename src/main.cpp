@@ -417,7 +417,7 @@ int main()
     // Path do mapa
     const std::string scene_map_path = ResolveScene00Path(g_SceneMapPath, "assets/scenes/scene00/map.obj");
     const std::string scene_collision_path = ResolveScene00Path(g_SceneCollisionPath, "assets/scenes/scene00/collision.obj");
-    const std::string player_model_path = ResolveScene00Path("../../assets/char/childlink_v2.obj", "assets/char/childlink_v2.obj");
+    const std::string player_model_path = ResolveScene00Path("../../assets/char/child_link_clean.obj", "assets/char/child_link_clean.obj");
 
     // Carregamos o mapa da cena para renderização.
     ObjModel scenario_map_model(scene_map_path.c_str());
@@ -462,6 +462,12 @@ int main()
     const glm::vec4 player_model_size = player_model_bbox_max - player_model_bbox_min;
     const float player_model_max_dimension = std::max(player_model_size.x, std::max(player_model_size.y, player_model_size.z));
     const float player_model_scale = (player_model_max_dimension > 1e-6f) ? (1.7f / player_model_max_dimension) : 1.0f;
+
+    g_PlayerCubeHalfExtents = glm::vec4(
+        player_model_size.x * player_model_scale * 0.5f,
+        player_model_size.y * player_model_scale * 0.5f,
+        player_model_size.z * player_model_scale * 0.5f,
+        0.0f);
 
     // Alinha collision.obj ao espaço do map.obj (centro + escala).
     // NOTA: Esta lógica automática foi desabilitada pois estava causando desalinhamento
@@ -1674,13 +1680,17 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
         glfwSetWindowShouldClose(window, GL_TRUE);
 
     // Se o usuário apertar a tecla P, mudará o tipo de câmera entre primeira pessoa e terceira pessoa. Veja definição das variáveis globais g_FirstPersonCamera e g_ThirdPersonCamera no início deste arquivo.
-    if (key == GLFW_KEY_P && action == GLFW_PRESS)
+    if (key == GLFW_KEY_P && action == GLFW_PRESS && !g_IsClimbingAVine && !g_IsClimbingALadder)
     {
         g_FirstPersonCamera = !g_FirstPersonCamera;
         g_ThirdPersonCamera = !g_ThirdPersonCamera;
 
         if (g_FirstPersonCamera)
         {
+            g_WPressed = false;
+            g_APressed = false;
+            g_SPressed = false;
+            g_DPressed = false;
             camera_view_vector = glm::vec4(-std::sin(g_PlayerYaw), 0.0f, std::cos(g_PlayerYaw), 0.0f);
         }
     }
@@ -1710,15 +1720,15 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
             printf("Stopped climbing ladder!\n");
     }
 
-    // Atualiza flags de input para movimento
+    // Atualiza flags de input para movimento (desabilitado em primeira pessoa)
     if (key == GLFW_KEY_W)
-        g_WPressed = (action != GLFW_RELEASE);
+        g_WPressed = (action != GLFW_RELEASE) && !g_FirstPersonCamera;
     if (key == GLFW_KEY_A)
-        g_APressed = (action != GLFW_RELEASE);
+        g_APressed = (action != GLFW_RELEASE) && !g_FirstPersonCamera;
     if (key == GLFW_KEY_S)
-        g_SPressed = (action != GLFW_RELEASE);
+        g_SPressed = (action != GLFW_RELEASE) && !g_FirstPersonCamera;
     if (key == GLFW_KEY_D)
-        g_DPressed = (action != GLFW_RELEASE);
+        g_DPressed = (action != GLFW_RELEASE) && !g_FirstPersonCamera;
     if (key == GLFW_KEY_SPACE)
         g_SpacePressed = (action != GLFW_RELEASE);
 }
