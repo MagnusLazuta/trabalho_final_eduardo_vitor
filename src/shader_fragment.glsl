@@ -24,6 +24,7 @@ uniform mat4 projection;
 #define PLANE  2
 #define SCENARIO 3
 #define PLAYER_CUBE 4
+#define DEBUG_CUBE 6
 #define PROJECTILE 5
 uniform int object_id;
 uniform int cube_colliding;
@@ -136,6 +137,7 @@ void main()
     {
         Kd0 = debug_color.rgb;
         alpha = debug_color.a;
+    }
     else if ( object_id == PROJECTILE )
     {
         Kd0 = vec3(0.46, 0.28, 0.12);
