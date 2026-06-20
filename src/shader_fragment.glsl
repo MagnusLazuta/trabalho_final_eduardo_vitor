@@ -24,8 +24,10 @@ uniform mat4 projection;
 #define PLANE  2
 #define SCENARIO 3
 #define PLAYER_CUBE 4
+#define DEBUG_CUBE 5
 uniform int object_id;
 uniform int cube_colliding;
+uniform vec4 debug_color;
 
 // Parâmetros da axis-aligned bounding box (AABB) do modelo
 uniform vec4 bbox_min;
@@ -153,6 +155,11 @@ void main()
     else if ( object_id == PLAYER_CUBE )
     {
         Kd0 = (cube_colliding == 1) ? vec3(0.95, 0.20, 0.20) : vec3(0.20, 0.85, 0.30);
+    }
+    else if ( object_id == DEBUG_CUBE )
+    {
+        Kd0 = debug_color.rgb;
+        alpha = debug_color.a;
     }
 
     // Equação de Iluminação

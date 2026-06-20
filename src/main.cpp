@@ -270,15 +270,94 @@ GLuint g_NumLoadedTextures = 0;
 
 const int OBJECT_ID_SCENARIO = 3;
 const int OBJECT_ID_PLAYER_CUBE = 4;
+const int OBJECT_ID_DEBUG_CUBE = 5;
 
 glm::vec4 camera_position_c;
 glm::vec4 camera_lookat_l;
 glm::vec4 camera_view_vector;
 glm::vec4 camera_up_vector;
 
+// Debug drawing system
+static GLuint g_DebugWireframeVAO = 0;
+static GLuint g_DebugWireframeVBO = 0;
+static GLuint g_DebugWireframeEBO = 0;
+static int g_DebugWireframeIndexCount = 0;
+
+void BuildDebugWireframeCube();
+void DrawDebugAABB(const glm::vec4 &center, const glm::vec4 &half_extents, const glm::vec4 &color);
+
 glm::mat4 GetScenarioModelMatrix()
 {
     return g_ScenarioModelMatrix;
+}
+
+// Debug drawing: build a unit wireframe cube centered at origin
+void BuildDebugWireframeCube()
+{
+    // 8 vertices of a unit cube
+    const float vertices[] = {
+        -0.5f, -0.5f, -0.5f,  // 0
+        +0.5f, -0.5f, -0.5f,  // 1
+        +0.5f, +0.5f, -0.5f,  // 2
+        -0.5f, +0.5f, -0.5f,  // 3
+        -0.5f, -0.5f, +0.5f,  // 4
+        +0.5f, -0.5f, +0.5f,  // 5
+        +0.5f, +0.5f, +0.5f,  // 6
+        -0.5f, +0.5f, +0.5f,  // 7
+    };
+
+    // 12 edges (24 indices for GL_LINES)
+    const GLuint indices[] = {
+        0, 1,  1, 2,  2, 3,  3, 0,  // back face
+        4, 5,  5, 6,  6, 7,  7, 4,  // front face
+        0, 4,  1, 5,  2, 6,  3, 7,  // connecting edges
+    };
+
+    g_DebugWireframeIndexCount = 24;
+
+    glGenVertexArrays(1, &g_DebugWireframeVAO);
+    glBindVertexArray(g_DebugWireframeVAO);
+
+    glGenBuffers(1, &g_DebugWireframeVBO);
+    glBindBuffer(GL_ARRAY_BUFFER, g_DebugWireframeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(0);
+
+    glGenBuffers(1, &g_DebugWireframeEBO);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_DebugWireframeEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+// Debug drawing: draw an AABB as a wireframe cube
+void DrawDebugAABB(const glm::vec4 &center, const glm::vec4 &half_extents, const glm::vec4 &color)
+{
+    if (g_DebugWireframeVAO == 0)
+        return;
+
+    // Compute model matrix: translate to center, scale by 2*half_extents
+    glm::mat4 model = Matrix_Translate(center.x, center.y, center.z) *
+                      Matrix_Scale(half_extents.x * 2.0f, half_extents.y * 2.0f, half_extents.z * 2.0f);
+
+    glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+    glUniform1i(g_object_id_uniform, OBJECT_ID_DEBUG_CUBE); // Use DEBUG_CUBE for debug color
+
+    // Set color uniform if it exists, otherwise use fixed function
+    GLint color_loc = glGetUniformLocation(g_GpuProgramID, "debug_color");
+    if (color_loc >= 0)
+        glUniform4f(color_loc, color.x, color.y, color.z, color.w);
+
+    // Draw wireframe
+    glDisable(GL_CULL_FACE);
+    glLineWidth(2.0f);
+    glBindVertexArray(g_DebugWireframeVAO);
+    glDrawElements(GL_LINES, g_DebugWireframeIndexCount, GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+    glLineWidth(1.0f);
+    glEnable(GL_CULL_FACE);
 }
 
 static std::string ResolveScene00Path(const char *relative_from_bin, const char *relative_from_root)
@@ -409,6 +488,9 @@ int main()
     // Carregamos os shaders de vértices e de fragmentos que serão utilizados
     // para renderização. Veja slides 180-200 do documento Aula_03_Rendering_Pipeline_Grafico.pdf.
     LoadShadersFromFiles();
+
+    // Build debug wireframe cube for hitbox visualization
+    BuildDebugWireframeCube();
 
     // Carregamos duas imagens para serem utilizadas como textura
     LoadTextureImage("../../data/red_brick_diff_1k.jpg");        // TextureImage0
@@ -657,6 +739,50 @@ int main()
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
         glFrontFace(GL_CCW);
+
+        // Debug drawing: render hitboxes if enabled
+        if (g_ShowDebugHitboxes)
+        {
+            glDisable(GL_DEPTH_TEST);
+            glDisable(GL_CULL_FACE);
+
+            // Draw player hitbox (green wireframe)
+            glm::vec4 player_color(0.0f, 1.0f, 0.0f, 1.0f);
+            DrawDebugAABB(g_PlayerCubePosition, g_PlayerCubeHalfExtents, player_color);
+
+            // Draw ladder hitboxes (yellow wireframe)
+            for (size_t i = 0; i < g_ScenarioCollisionShapes.size(); ++i)
+            {
+                if (g_ScenarioCollisionShapes[i].type == CollisionShapeType::LADDER)
+                {
+                    glm::vec4 ladder_center = (g_ScenarioCollisionShapes[i].bbox_min + g_ScenarioCollisionShapes[i].bbox_max) * 0.5f;
+                    glm::vec4 ladder_half = (g_ScenarioCollisionShapes[i].bbox_max - g_ScenarioCollisionShapes[i].bbox_min) * 0.5f;
+                    ladder_center.w = 1.0f;
+                    ladder_half.w = 0.0f;
+                    glm::vec4 ladder_color(1.0f, 1.0f, 0.0f, 1.0f);
+                    DrawDebugAABB(ladder_center, ladder_half, ladder_color);
+                }
+            }
+
+            // Draw vine hitboxes (magenta wireframe)
+            for (size_t i = 0; i < g_ScenarioCollisionShapes.size(); ++i)
+            {
+                if (g_ScenarioCollisionShapes[i].type == CollisionShapeType::VINES)
+                {
+                    glm::vec4 vine_center = (g_ScenarioCollisionShapes[i].bbox_min + g_ScenarioCollisionShapes[i].bbox_max) * 0.5f;
+                    glm::vec4 vine_half = (g_ScenarioCollisionShapes[i].bbox_max - g_ScenarioCollisionShapes[i].bbox_min) * 0.5f;
+                    vine_center.w = 1.0f;
+                    vine_half.w = 0.0f;
+                    glm::vec4 vine_color(1.0f, 0.0f, 1.0f, 1.0f);
+                    DrawDebugAABB(vine_center, vine_half, vine_color);
+                }
+            }
+
+            glEnable(GL_DEPTH_TEST);
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_BACK);
+            glFrontFace(GL_CCW);
+        }
 
         // Imprimimos na tela os ângulos de Euler que controlam a rotação do
         // terceiro cubo.
@@ -1700,6 +1826,14 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
     {
         LoadShadersFromFiles();
         fprintf(stdout, "Shaders recarregados!\n");
+        fflush(stdout);
+    }
+
+    // F1 toggles debug hitbox visualization
+    if (key == GLFW_KEY_F1 && action == GLFW_PRESS)
+    {
+        g_ShowDebugHitboxes = !g_ShowDebugHitboxes;
+        fprintf(stdout, "Debug hitboxes: %s\n", g_ShowDebugHitboxes ? "ON" : "OFF");
         fflush(stdout);
     }
 

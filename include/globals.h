@@ -21,3 +21,6 @@ extern bool g_IsClimbingAVine;
 extern bool g_IsClimbingALadder;
 extern bool g_CollidedWithAVine;
 extern bool g_CollidedWithALadder;
+
+// Debug drawing
+extern bool g_ShowDebugHitboxes;
