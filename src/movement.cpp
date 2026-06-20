@@ -80,12 +80,15 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     glm::vec4 h_half_extents = g_PlayerCubeHalfExtents;
     h_half_extents.y -= horizontal_test_margin / 2.0f;
 
+    CollisionOBB player_obb = {updated_position, h_half_extents, g_PlayerYaw};
+
     // Teste de colisão horizontal (X e Z)
     // Movimento X
     glm::vec4 test_pos_x = updated_position;
     test_pos_x.x += horizontal_move.x;
     test_pos_x.y += horizontal_test_margin / 2.0f;
-    CollisionShapeType col_x = CollidesWithScenario(test_pos_x, g_ScenarioCollisionShapes, h_half_extents);
+    CollisionOBB obb_x = {test_pos_x, h_half_extents, g_PlayerYaw};
+    CollisionShapeType col_x = CollidesWithScenarioObb(obb_x, g_ScenarioCollisionShapes);
     if (col_x != CollisionShapeType::SOLID && col_x != CollisionShapeType::DOOR)
         updated_position.x = test_pos_x.x;
 
@@ -93,14 +96,16 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     glm::vec4 test_pos_z = updated_position;
     test_pos_z.z += horizontal_move.z;
     test_pos_z.y += horizontal_test_margin / 2.0f;
-    CollisionShapeType col_z = CollidesWithScenario(test_pos_z, g_ScenarioCollisionShapes, h_half_extents);
+    CollisionOBB obb_z = {test_pos_z, h_half_extents, g_PlayerYaw};
+    CollisionShapeType col_z = CollidesWithScenarioObb(obb_z, g_ScenarioCollisionShapes);
     if (col_z != CollisionShapeType::SOLID && col_z != CollisionShapeType::DOOR)
         updated_position.z = test_pos_z.z;
 
     // Movimento Y
     glm::vec4 test_pos_y = updated_position;
     test_pos_y.y += vertical_move_amount;
-    CollisionShapeType col_y = CollidesWithScenario(test_pos_y, g_ScenarioCollisionShapes, g_PlayerCubeHalfExtents);
+    CollisionOBB obb_y = {test_pos_y, g_PlayerCubeHalfExtents, g_PlayerYaw};
+    CollisionShapeType col_y = CollidesWithScenarioObb(obb_y, g_ScenarioCollisionShapes);
     
     if (col_y != CollisionShapeType::SOLID && col_y != CollisionShapeType::DOOR)
     {
@@ -118,10 +123,12 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
 
     // Atualiza flags de colisão.
     glm::vec4 detection_extents = g_PlayerCubeHalfExtents * 1.1f;
-    g_CollidedWithAVine = IsCollidingWithType(g_PlayerCubePosition, detection_extents, g_ScenarioCollisionShapes, CollisionShapeType::VINES);
-    g_CollidedWithALadder = IsCollidingWithType(g_PlayerCubePosition, detection_extents, g_ScenarioCollisionShapes, CollisionShapeType::LADDER);
+    CollisionOBB detection_obb = {g_PlayerCubePosition, detection_extents, g_PlayerYaw};
+    g_CollidedWithAVine = IsCollidingWithTypeObb(detection_obb, g_ScenarioCollisionShapes, CollisionShapeType::VINES);
+    g_CollidedWithALadder = IsCollidingWithTypeObb(detection_obb, g_ScenarioCollisionShapes, CollisionShapeType::LADDER);
     
-    CollisionShapeType real_col = CollidesWithScenario(g_PlayerCubePosition, g_ScenarioCollisionShapes, g_PlayerCubeHalfExtents);
+    CollisionOBB real_obb = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
+    CollisionShapeType real_col = CollidesWithScenarioObb(real_obb, g_ScenarioCollisionShapes);
     g_PlayerCubeColliding = (real_col == CollisionShapeType::SOLID || real_col == CollisionShapeType::DOOR);
 
     // Auto-stop climbing se o jogador se mover para fora da área de colisão (com a margem de segurança)

@@ -360,6 +360,31 @@ void DrawDebugAABB(const glm::vec4 &center, const glm::vec4 &half_extents, const
     glEnable(GL_CULL_FACE);
 }
 
+void DrawDebugOBB(const CollisionOBB &obb, const glm::vec4 &color)
+{
+    if (g_DebugWireframeVAO == 0)
+        return;
+
+    glm::mat4 model = Matrix_Translate(obb.center.x, obb.center.y, obb.center.z) *
+                      Matrix_Rotate_Y(-obb.yaw) *
+                      Matrix_Scale(obb.half_extents.x * 2.0f, obb.half_extents.y * 2.0f, obb.half_extents.z * 2.0f);
+
+    glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+    glUniform1i(g_object_id_uniform, OBJECT_ID_DEBUG_CUBE);
+
+    GLint color_loc = glGetUniformLocation(g_GpuProgramID, "debug_color");
+    if (color_loc >= 0)
+        glUniform4f(color_loc, color.x, color.y, color.z, color.w);
+
+    glDisable(GL_CULL_FACE);
+    glLineWidth(2.0f);
+    glBindVertexArray(g_DebugWireframeVAO);
+    glDrawElements(GL_LINES, g_DebugWireframeIndexCount, GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+    glLineWidth(1.0f);
+    glEnable(GL_CULL_FACE);
+}
+
 static std::string ResolveScene00Path(const char *relative_from_bin, const char *relative_from_root)
 {
     std::ifstream test_bin(relative_from_bin);
@@ -748,7 +773,8 @@ int main()
 
             // Draw player hitbox (green wireframe)
             glm::vec4 player_color(0.0f, 1.0f, 0.0f, 1.0f);
-            DrawDebugAABB(g_PlayerCubePosition, g_PlayerCubeHalfExtents, player_color);
+            CollisionOBB player_obb = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
+            DrawDebugOBB(player_obb, player_color);
 
             // Draw ladder hitboxes (yellow wireframe)
             for (size_t i = 0; i < g_ScenarioCollisionShapes.size(); ++i)
