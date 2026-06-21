@@ -159,6 +159,7 @@ void TextRendering_PrintMatrixVectorProductDivW(GLFWwindow *window, glm::mat4 M,
 // outras informações do programa. Definidas após main().
 void TextRendering_ShowModelViewProjection(GLFWwindow *window, glm::mat4 projection, glm::mat4 view, glm::mat4 model, glm::vec4 p_model);
 void TextRendering_ShowEulerAngles(GLFWwindow *window);
+void TextRendering_ShowPlayerPosition(GLFWwindow *window);
 void TextRendering_ShowProjection(GLFWwindow *window);
 void TextRendering_ShowFramesPerSecond(GLFWwindow *window);
 
@@ -211,6 +212,7 @@ const char *g_SceneMapPath = "../../assets/scenes/scene00/map.obj";
 const char *g_SceneCollisionPath = "../../assets/scenes/scene00/collision.obj";
 
 static const glm::vec4 g_HardcodedTestSpawnPosition(2.46f, 4.80f, 1.28f, 1.0f);
+static const char *g_EnemySpawnAreaId = "scene00_area01";
 
 // Razão de proporção da janela (largura/altura). Veja função FramebufferSizeCallback().
 float g_ScreenRatio = 1.0f;
@@ -1682,7 +1684,7 @@ int main()
     g_PlayerYaw = 0.0f;
     g_CameraYaw = g_PlayerYaw;
     g_CameraInitialized = false;
-    InitializeEnemies(g_HardcodedTestSpawnPosition);
+    InitializeEnemies(g_EnemySpawnAreaId);
 
     // Inicializamos o código para renderização de texto.
     TextRendering_Init();
@@ -2048,6 +2050,9 @@ int main()
         // Imprimimos na tela os ângulos de Euler que controlam a rotação do
         // terceiro cubo.
         TextRendering_ShowEulerAngles(window);
+
+        // Imprimimos na tela a posição do personagem principal para debug.
+        TextRendering_ShowPlayerPosition(window);
 
         // Imprimimos na informação sobre a matriz de projeção sendo utilizada.
         TextRendering_ShowProjection(window);
@@ -3258,6 +3263,25 @@ void TextRendering_ShowProjection(GLFWwindow *window)
 
 // Escrevemos na tela o número de quadros renderizados por segundo (frames per
 // second).
+void TextRendering_ShowPlayerPosition(GLFWwindow *window)
+{
+    if (!g_ShowInfoText)
+        return;
+
+    float pad = TextRendering_LineHeight(window);
+
+    char buffer[128];
+    snprintf(
+        buffer,
+        sizeof(buffer),
+        "Player Pos | X: %+05.2f Y: %+05.2f Z: %+05.2f",
+        g_PlayerCubePosition.x,
+        g_PlayerCubePosition.y,
+        g_PlayerCubePosition.z);
+
+    TextRendering_PrintString(window, buffer, -1.0f + pad / 10, -1.0f + 12 * pad / 10, 1.0f);
+}
+
 void TextRendering_ShowFramesPerSecond(GLFWwindow *window)
 {
     if (!g_ShowInfoText)

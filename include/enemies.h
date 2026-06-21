@@ -132,7 +132,7 @@ struct EnemyDrawContext
     void (*draw_virtual_object)(const char *object_name);
 };
 
-void InitializeEnemies(const glm::vec4 &hardcoded_test_spawn_position);
+void InitializeEnemies(const std::string &area_id);
 void UpdateEnemies(float delta_time, const EnemyUpdateContext &context);
 void UpdateEnemy(std::size_t enemy_index, float delta_time, const EnemyUpdateContext &context);
 void DrawEnemies(const EnemyDrawContext &context);

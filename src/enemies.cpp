@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <iterator>
+#include <sstream>
 
 #include <glm/gtc/type_ptr.hpp>
 
@@ -46,6 +49,14 @@ static const float GOHMA_LARVA_JUMP_DURATION = 0.7f;
 static const float QUEEN_GOHMA_STUN_DURATION = 4.0f;
 
 static const RenderModelInfo g_EmptyRenderModelInfo = {false, {}, glm::vec4(0.0f), 1.0f};
+static const char *g_EnemySpawnScriptPathFromBin = "../../data/enemy_spawns.json";
+static const char *g_EnemySpawnScriptPathFromRoot = "data/enemy_spawns.json";
+
+struct ScriptEnemySpawn
+{
+    std::string type;
+    glm::vec4 position;
+};
 
 static float Clamp01(float value)
 {
@@ -75,6 +86,150 @@ static float ComputeYawToTarget(const glm::vec4 &from, const glm::vec4 &to)
 {
     const glm::vec4 delta = to - from;
     return std::atan2(delta.x, delta.z);
+}
+
+static std::string ResolveEnemySpawnScriptPath()
+{
+    std::ifstream test_bin(g_EnemySpawnScriptPathFromBin);
+    if (test_bin.good())
+        return std::string(g_EnemySpawnScriptPathFromBin);
+
+    std::ifstream test_root(g_EnemySpawnScriptPathFromRoot);
+    if (test_root.good())
+        return std::string(g_EnemySpawnScriptPathFromRoot);
+
+    return std::string(g_EnemySpawnScriptPathFromBin);
+}
+
+static std::string LoadTextFile(const std::string &path)
+{
+    std::ifstream file(path.c_str());
+    if (!file.is_open())
+        return std::string();
+
+    return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+}
+
+static std::size_t FindMatchingDelimiter(const std::string &text, std::size_t open_pos, char open_char, char close_char)
+{
+    if (open_pos == std::string::npos || open_pos >= text.size() || text[open_pos] != open_char)
+        return std::string::npos;
+
+    int depth = 0;
+    for (std::size_t i = open_pos; i < text.size(); ++i)
+    {
+        if (text[i] == open_char)
+            ++depth;
+        else if (text[i] == close_char)
+        {
+            --depth;
+            if (depth == 0)
+                return i;
+        }
+    }
+
+    return std::string::npos;
+}
+
+static std::vector<ScriptEnemySpawn> LoadEnemySpawnsForArea(const std::string &area_id)
+{
+    const std::string script_path = ResolveEnemySpawnScriptPath();
+    const std::string json_text = LoadTextFile(script_path);
+    if (json_text.empty())
+    {
+        std::fprintf(stderr, "[EnemySpawn] Failed to read spawn script: %s\n", script_path.c_str());
+        return {};
+    }
+
+    const std::string area_token = "\"id\": \"" + area_id + "\"";
+    const std::size_t area_pos = json_text.find(area_token);
+    if (area_pos == std::string::npos)
+    {
+        std::fprintf(stderr, "[EnemySpawn] Area '%s' not found in %s\n", area_id.c_str(), script_path.c_str());
+        return {};
+    }
+
+    const std::size_t enemies_key_pos = json_text.find("\"enemies\"", area_pos);
+    if (enemies_key_pos == std::string::npos)
+    {
+        std::fprintf(stderr, "[EnemySpawn] Area '%s' is missing an enemies array in %s\n", area_id.c_str(), script_path.c_str());
+        return {};
+    }
+
+    const std::size_t array_start = json_text.find('[', enemies_key_pos);
+    const std::size_t array_end = FindMatchingDelimiter(json_text, array_start, '[', ']');
+    if (array_start == std::string::npos || array_end == std::string::npos || array_end <= array_start)
+    {
+        std::fprintf(stderr, "[EnemySpawn] Area '%s' has an invalid enemies array in %s\n", area_id.c_str(), script_path.c_str());
+        return {};
+    }
+
+    const std::string enemies_block = json_text.substr(array_start + 1, array_end - array_start - 1);
+
+    std::vector<ScriptEnemySpawn> spawns;
+    std::size_t entry_pos = 0;
+    while (true)
+    {
+        const std::size_t type_key_pos = enemies_block.find("\"type\"", entry_pos);
+        if (type_key_pos == std::string::npos)
+            break;
+
+        const std::size_t type_value_start = enemies_block.find('"', type_key_pos + 6);
+        const std::size_t type_value_end = enemies_block.find('"', type_value_start + 1);
+        const std::size_t position_key_pos = enemies_block.find("\"position\"", type_value_end);
+        const std::size_t position_value_start = enemies_block.find('[', position_key_pos);
+        const std::size_t position_value_end = enemies_block.find(']', position_value_start);
+
+        if (type_value_start == std::string::npos ||
+            type_value_end == std::string::npos ||
+            position_key_pos == std::string::npos ||
+            position_value_start == std::string::npos ||
+            position_value_end == std::string::npos)
+        {
+            break;
+        }
+
+        std::string position_values = enemies_block.substr(position_value_start + 1, position_value_end - position_value_start - 1);
+        std::replace(position_values.begin(), position_values.end(), ',', ' ');
+        std::stringstream position_stream(position_values);
+
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+        if (!(position_stream >> x >> y >> z))
+        {
+            entry_pos = position_value_end + 1;
+            continue;
+        }
+
+        ScriptEnemySpawn spawn;
+        spawn.type = enemies_block.substr(type_value_start + 1, type_value_end - type_value_start - 1);
+        spawn.position = glm::vec4(x, y, z, 1.0f);
+        spawns.push_back(spawn);
+
+        entry_pos = position_value_end + 1;
+    }
+
+    if (spawns.empty())
+    {
+        std::fprintf(stderr, "[EnemySpawn] Area '%s' has no valid enemy entries in %s\n", area_id.c_str(), script_path.c_str());
+    }
+    else
+    {
+        std::fprintf(stdout, "[EnemySpawn] Loaded %zu spawns for area '%s' from %s\n", spawns.size(), area_id.c_str(), script_path.c_str());
+        for (std::size_t i = 0; i < spawns.size(); ++i)
+        {
+            std::fprintf(
+                stdout,
+                "[EnemySpawn]   %s at (%.2f, %.2f, %.2f)\n",
+                spawns[i].type.c_str(),
+                spawns[i].position.x,
+                spawns[i].position.y,
+                spawns[i].position.z);
+        }
+    }
+
+    return spawns;
 }
 
 static glm::vec4 ForwardFromYaw(float yaw)
@@ -131,6 +286,48 @@ static Enemy MakeEnemy(
     enemy.debug_color = glm::vec4(0.75f, 0.75f, 0.75f, 1.0f);
     enemy.object_name = object_name;
     return enemy;
+}
+
+static bool TryCreateEnemyFromScriptSpawn(const ScriptEnemySpawn &spawn, Enemy &out_enemy)
+{
+    if (spawn.type == "baba")
+    {
+        out_enemy = MakeEnemy(
+            EnemyType::DEKU_BABA,
+            EnemyState::Idle,
+            spawn.position,
+            glm::vec4(1.0f, 1.0f, 1.0f, 0.0f),
+            glm::vec4(0.45f, 0.95f, 0.45f, 0.0f),
+            2,
+            3.8f,
+            1.3f,
+            1.8f,
+            "Dekubaba");
+        out_enemy.debug_color = glm::vec4(0.42f, 0.82f, 0.28f, 1.0f);
+        return true;
+    }
+
+    if (spawn.type == "small spider")
+    {
+        out_enemy = MakeEnemy(
+            EnemyType::SKULLWALLTULA,
+            EnemyState::Idle,
+            spawn.position,
+            glm::vec4(SKULLWALLTULA_SCALE, SKULLWALLTULA_SCALE, SKULLWALLTULA_SCALE, 0.0f),
+            glm::vec4(0.58f, 0.76f, 0.58f, 0.0f),
+            2,
+            0.0f,
+            1.1f,
+            0.0f,
+            "Only_Spider_with_Animations_Export");
+        out_enemy.timer_a = 0.35f;
+        out_enemy.timer_b = PI;
+        out_enemy.blocks_movement = true;
+        out_enemy.debug_color = glm::vec4(0.72f, 0.72f, 0.72f, 1.0f);
+        return true;
+    }
+
+    return false;
 }
 
 static void QueueEnemySpawn(const Enemy &enemy)
@@ -876,119 +1073,25 @@ static void UpdateQueenGohma(Enemy &enemy, float delta_time, const EnemyUpdateCo
         enemy.attack_cooldown_timer = std::max(0.0f, enemy.attack_cooldown_timer - delta_time);
 }
 
-void InitializeEnemies(const glm::vec4 &hardcoded_test_spawn_position)
+void InitializeEnemies(const std::string &area_id)
 {
     g_Enemies.clear();
     g_PendingEnemySpawns.clear();
     g_EnemyProjectiles.clear();
-    const float test_ground_y = hardcoded_test_spawn_position.y - 4.0f;
+    const std::vector<ScriptEnemySpawn> spawns = LoadEnemySpawnsForArea(area_id);
+    for (std::size_t i = 0; i < spawns.size(); ++i)
+    {
+        Enemy enemy;
+        if (!TryCreateEnemyFromScriptSpawn(spawns[i], enemy))
+        {
+            std::fprintf(stderr, "[EnemySpawn] Unsupported enemy type '%s' in area '%s'\n", spawns[i].type.c_str(), area_id.c_str());
+            continue;
+        }
 
-    Enemy deku_baba = MakeEnemy(
-        EnemyType::DEKU_BABA,
-        EnemyState::Idle,
-        glm::vec4(4.3f, test_ground_y, 2.4f, 1.0f),
-        glm::vec4(1.0f, 1.0f, 1.0f, 0.0f),
-        glm::vec4(0.45f, 0.95f, 0.45f, 0.0f),
-        2,
-        3.8f,
-        1.3f,
-        1.8f,
-        "Dekubaba");
-    deku_baba.debug_color = glm::vec4(0.42f, 0.82f, 0.28f, 1.0f);
-    g_Enemies.push_back(deku_baba);
+        g_Enemies.push_back(enemy);
+    }
 
-    Enemy withered = MakeEnemy(
-        EnemyType::WITHERED_DEKU_BABA,
-        EnemyState::Idle,
-        glm::vec4(0.9f, test_ground_y, 4.6f, 1.0f),
-        glm::vec4(0.72f, 0.72f, 0.72f, 0.0f),
-        glm::vec4(0.38f, 0.60f, 0.38f, 0.0f),
-        1,
-        0.0f,
-        0.0f,
-        0.0f,
-        "Dekubaba");
-    withered.yaw = 0.35f;
-    withered.timer_b = withered.yaw;
-    withered.debug_color = glm::vec4(0.70f, 0.62f, 0.38f, 1.0f);
-    g_Enemies.push_back(withered);
-
-    Enemy deku_scrub = MakeEnemy(
-        EnemyType::DEKU_SCRUB,
-        EnemyState::Hidden,
-        glm::vec4(6.8f, test_ground_y, -0.3f, 1.0f),
-        glm::vec4(1.0f, 1.0f, 1.0f, 0.0f),
-        glm::vec4(0.95f, 0.95f, 0.95f, 0.0f),
-        2,
-        6.2f,
-        5.5f,
-        1.7f,
-        "nodes_12__meshes[2]");
-    deku_scrub.debug_color = glm::vec4(0.86f, 0.58f, 0.22f, 1.0f);
-    g_Enemies.push_back(deku_scrub);
-
-    Enemy skullwalltula = MakeEnemy(
-        EnemyType::SKULLWALLTULA,
-        EnemyState::Idle,
-        glm::vec4(1.8f, test_ground_y, -2.4f, 1.0f),
-        glm::vec4(SKULLWALLTULA_SCALE, SKULLWALLTULA_SCALE, SKULLWALLTULA_SCALE, 0.0f),
-        glm::vec4(0.58f, 0.76f, 0.58f, 0.0f),
-        2,
-        0.0f,
-        1.1f,
-        0.0f,
-        "Only_Spider_with_Animations_Export");
-    skullwalltula.timer_a = 0.35f;
-    skullwalltula.timer_b = PI;
-    skullwalltula.blocks_movement = true;
-    skullwalltula.debug_color = glm::vec4(0.72f, 0.72f, 0.72f, 1.0f);
-    g_Enemies.push_back(skullwalltula);
-
-    Enemy big_skulltula = MakeEnemy(
-        EnemyType::BIG_SKULLTULA,
-        EnemyState::Turning,
-        glm::vec4(4.9f, test_ground_y, -3.1f, 1.0f),
-        glm::vec4(BIG_SKULLTULA_SCALE, BIG_SKULLTULA_SCALE, BIG_SKULLTULA_SCALE, 0.0f),
-        glm::vec4(0.72f, 0.72f, 0.72f, 0.0f),
-        3,
-        0.0f,
-        BIG_SKULLTULA_ATTACK_RADIUS,
-        BIG_SKULLTULA_COOLDOWN,
-        "Only_Spider_with_Animations_Export");
-    big_skulltula.yaw = -PI * 0.5f;
-    big_skulltula.blocks_movement = true;
-    big_skulltula.debug_color = glm::vec4(0.22f, 0.22f, 0.22f, 1.0f);
-    g_Enemies.push_back(big_skulltula);
-
-    Enemy larva = MakeEnemy(
-        EnemyType::GOHMA_LARVA,
-        EnemyState::Idle,
-        glm::vec4(10.2f, test_ground_y, 2.0f, 1.0f),
-        glm::vec4(1.44f, 1.44f, 1.44f, 0.0f),
-        glm::vec4(0.64f, 0.40f, 0.64f, 0.0f),
-        2,
-        5.5f,
-        1.0f,
-        1.8f,
-        "gohma_larva_placeholder");
-    larva.vulnerable = true;
-    larva.debug_color = glm::vec4(0.25f, 0.82f, 0.36f, 1.0f);
-    g_Enemies.push_back(larva);
-
-    Enemy queen_gohma = MakeEnemy(
-        EnemyType::QUEEN_GOHMA,
-        EnemyState::BossIdle,
-        glm::vec4(13.8f, test_ground_y, -1.6f, 1.0f),
-        glm::vec4(1.0f, 1.0f, 1.0f, 0.0f),
-        glm::vec4(1.10f, 0.95f, 1.10f, 0.0f),
-        8,
-        12.0f,
-        3.2f,
-        2.5f,
-        "Queen_Gohma");
-    queen_gohma.yaw = -PI * 0.5f;
-    queen_gohma.debug_color = glm::vec4(0.62f, 0.25f, 0.22f, 1.0f);
-    g_Enemies.push_back(queen_gohma);
+    std::fprintf(stdout, "[EnemySpawn] Instantiated %zu enemies for area '%s'\n", g_Enemies.size(), area_id.c_str());
 }
 
 void UpdateEnemy(std::size_t enemy_index, float delta_time, const EnemyUpdateContext &context)
