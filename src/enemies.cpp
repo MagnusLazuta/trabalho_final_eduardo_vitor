@@ -307,10 +307,15 @@ static void SpawnEnemyProjectile(
 
 static void SpawnDekuScrubProjectile(const Enemy &enemy, const glm::vec4 &direction_to_player)
 {
-    const glm::vec4 velocity = NormalizeXZ(direction_to_player) * 6.5f;
+    const glm::vec4 forward = NormalizeXZ(direction_to_player);
+    const glm::vec4 velocity = forward * 6.5f;
+    const glm::vec4 spawn_offset =
+        forward * 0.58f +
+        glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+
     SpawnEnemyProjectile(
         EnemyProjectileType::DEKU_NUT,
-        enemy.position + glm::vec4(0.0f, 0.45f, 0.0f, 0.0f),
+        enemy.position + spawn_offset,
         velocity,
         3.2f,
         0.42f);
