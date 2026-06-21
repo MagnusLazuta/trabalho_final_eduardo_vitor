@@ -1,3 +1,19 @@
+# Pré-requisito: compilar libassimp.a
+
+Antes da primeira compilação do projeto, é necessário compilar a biblioteca
+estática do Assimp. Execute o script abaixo **uma única vez**:
+
+```bash
+./scripts/build_assimp.sh
+```
+
+Isso irá clonar o código fonte do Assimp, compilar a biblioteca estática
+(`libassimp.a`) e copiá-la para `lib-assimp/`. O processo leva alguns minutos.
+
+Requisitos adicionais: `git`, `cmake`, `g++`.
+
+---
+
 # Linux
 
 Para compilar e executar este projeto no Linux, primeiro você precisa
