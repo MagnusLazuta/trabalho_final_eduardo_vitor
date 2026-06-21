@@ -16,6 +16,7 @@ set(SOURCES
   src/globals.cpp
   src/movement.cpp
   src/enemies.cpp
+  src/effects.cpp
 )
 
 cmake_minimum_required(VERSION 3.5.0)

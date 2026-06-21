@@ -9,6 +9,7 @@
 
 #include <glm/gtc/type_ptr.hpp>
 
+#include "effects.h"
 #include "matrices.h"
 #include "movement.h"
 
@@ -47,6 +48,8 @@ static const float BIG_SKULLTULA_RECOVERY_TILT = -0.18f;
 static const float BIG_SKULLTULA_IDLE_TILT_SWAY = 0.05f;
 static const float GOHMA_LARVA_JUMP_DURATION = 0.7f;
 static const float QUEEN_GOHMA_STUN_DURATION = 4.0f;
+static const float ENEMY_DEATH_DURATION = 1.15f;
+static const float ENEMY_DEATH_GRAVITY = 7.8f;
 
 static const RenderModelInfo g_EmptyRenderModelInfo = {false, {}, glm::vec4(0.0f), 1.0f};
 static const char *g_EnemySpawnScriptPathFromBin = "../../data/enemy_spawns.json";
@@ -283,6 +286,11 @@ static Enemy MakeEnemy(
     enemy.visible = true;
     enemy.blocks_movement = false;
     enemy.has_spawned_helpers = false;
+    enemy.death_effect_spawned = false;
+    enemy.death_timer = 0.0f;
+    enemy.death_start_position = position;
+    enemy.death_velocity = glm::vec4(0.0f);
+    enemy.death_rotation = 0.0f;
     enemy.debug_color = glm::vec4(0.75f, 0.75f, 0.75f, 1.0f);
     enemy.object_name = object_name;
     return enemy;
@@ -374,6 +382,9 @@ static glm::mat4 BuildEnemyModelMatrix(const Enemy &enemy, const EnemyRenderReso
     if (std::fabs(enemy.pitch) > 1e-4f)
         model = model * Matrix_Rotate_X(enemy.pitch);
 
+    if (enemy.state == EnemyState::Dying && std::fabs(enemy.death_rotation) > 1e-4f)
+        model = model * Matrix_Rotate_Z(enemy.death_rotation);
+
     model = model *
             Matrix_Scale(
                 enemy.scale.x * render_info.base_scale,
@@ -444,7 +455,8 @@ static bool BoxesIntersect(
 
 static bool EnemyBlocksPlayerMovement(const Enemy &enemy)
 {
-    return enemy.active && !enemy.dead && enemy.visible && enemy.blocks_movement;
+    return enemy.active && !enemy.dead && enemy.visible &&
+           enemy.state != EnemyState::Dying && enemy.blocks_movement;
 }
 
 static bool WouldBlockingEnemyOverlapPlayer(
@@ -487,8 +499,30 @@ static void MoveEnemyWithScenarioCollision(
     enemy.position = updated_position;
 }
 
-static void KillEnemy(Enemy &enemy)
+static bool IsWallMountedEnemy(const Enemy &enemy)
 {
+    return enemy.type == EnemyType::SKULLWALLTULA;
+}
+
+static float GetApproximateDeathGroundY(const Enemy &enemy)
+{
+    if (enemy.type == EnemyType::SKULLWALLTULA)
+    {
+        // TODO: Substituir por amostragem real do chao quando a colisao expuser altura precisa.
+        return enemy.spawn_position.y - (SKULLWALLTULA_VERTICAL_RANGE + 0.85f);
+    }
+
+    return enemy.spawn_position.y - 0.12f;
+}
+
+static void FinalizeEnemyDeath(Enemy &enemy)
+{
+    if (!enemy.death_effect_spawned)
+    {
+        SpawnSmokeBurst(enemy.position + glm::vec4(0.0f, enemy.collision_half_extents.y * 0.30f, 0.0f, 0.0f));
+        enemy.death_effect_spawned = true;
+    }
+
     enemy.dead = true;
     enemy.active = false;
     enemy.visible = false;
@@ -496,6 +530,66 @@ static void KillEnemy(Enemy &enemy)
     enemy.state = (enemy.type == EnemyType::QUEEN_GOHMA) ? EnemyState::BossDead : EnemyState::Dead;
 
     // TODO: Integrar drops (Deku Stick, Deku Nut e recompensas do chefe).
+}
+
+static void BeginEnemyDeath(Enemy &enemy)
+{
+    if (!enemy.active || enemy.dead || enemy.state == EnemyState::Dying)
+        return;
+
+    enemy.state = EnemyState::Dying;
+    enemy.state_timer = 0.0f;
+    enemy.death_timer = 0.0f;
+    enemy.death_start_position = enemy.position;
+    enemy.death_rotation = 0.0f;
+    enemy.death_effect_spawned = false;
+    enemy.vulnerable = false;
+    enemy.blocks_movement = false;
+    enemy.has_spawned_helpers = false;
+
+    if (IsWallMountedEnemy(enemy))
+    {
+        const glm::vec4 outward = ForwardFromYaw(enemy.yaw);
+        enemy.death_velocity = outward * 0.55f + glm::vec4(0.0f, 1.55f, 0.0f, 0.0f);
+    }
+    else
+    {
+        const glm::vec4 backward = -ForwardFromYaw(enemy.yaw) * 0.18f;
+        enemy.death_velocity = backward;
+    }
+
+    // A fumaça aparece no momento em que o corpo some, para reforçar o desaparecimento.
+}
+
+static void UpdateEnemyDying(Enemy &enemy, float delta_time)
+{
+    enemy.death_timer += delta_time;
+
+    if (IsWallMountedEnemy(enemy))
+    {
+        enemy.death_velocity.y -= ENEMY_DEATH_GRAVITY * delta_time;
+        enemy.position += enemy.death_velocity * delta_time;
+        enemy.pitch -= 4.0f * delta_time;
+        enemy.death_rotation += 6.0f * delta_time;
+
+        const float ground_y = GetApproximateDeathGroundY(enemy);
+        if (enemy.position.y <= ground_y)
+        {
+            enemy.position.y = ground_y;
+            enemy.death_velocity = glm::vec4(0.0f);
+        }
+    }
+    else
+    {
+        const float death_progress = Clamp01(enemy.death_timer / ENEMY_DEATH_DURATION);
+        enemy.position += enemy.death_velocity * delta_time;
+        enemy.position.y = enemy.death_start_position.y - 0.18f * death_progress;
+        enemy.pitch = -1.10f * death_progress;
+        enemy.death_rotation = 0.75f * death_progress;
+    }
+
+    if (enemy.death_timer >= ENEMY_DEATH_DURATION)
+        FinalizeEnemyDeath(enemy);
 }
 
 static void ApplyDamageToEnemy(Enemy &enemy, int damage)
@@ -528,7 +622,7 @@ static void ApplyDamageToEnemy(Enemy &enemy, int damage)
     enemy.health -= damage;
     if (enemy.health <= 0)
     {
-        KillEnemy(enemy);
+        BeginEnemyDeath(enemy);
         return;
     }
 
@@ -1103,6 +1197,12 @@ void UpdateEnemy(std::size_t enemy_index, float delta_time, const EnemyUpdateCon
     enemy.state_timer += delta_time;
     enemy.animation_timer += delta_time;
 
+    if (enemy.state == EnemyState::Dying)
+    {
+        UpdateEnemyDying(enemy, delta_time);
+        return;
+    }
+
     switch (enemy.type)
     {
     case EnemyType::DEKU_BABA:
@@ -1290,7 +1390,7 @@ int QueryEnemyHitByPlayerProjectile(const glm::vec4 &projectile_position, float 
     for (std::size_t i = 0; i < g_Enemies.size(); ++i)
     {
         const Enemy &enemy = g_Enemies[i];
-        if (!enemy.active || enemy.dead || !enemy.visible)
+        if (!enemy.active || enemy.dead || !enemy.visible || enemy.state == EnemyState::Dying)
             continue;
 
         if (EnemyAabbIntersectsPointBox(enemy, projectile_position, projectile_half_extents))

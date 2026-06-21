@@ -35,6 +35,7 @@ enum class EnemyState
     Recovering,
     Chasing,
     Jumping,
+    Dying,
     Dead,
     BossIdle,
     BossLookAtPlayer,
@@ -77,6 +78,11 @@ struct Enemy
     bool visible;
     bool blocks_movement;
     bool has_spawned_helpers;
+    bool death_effect_spawned;
+    float death_timer;
+    glm::vec4 death_start_position;
+    glm::vec4 death_velocity;
+    float death_rotation;
     glm::vec4 debug_color;
     std::string object_name;
 };

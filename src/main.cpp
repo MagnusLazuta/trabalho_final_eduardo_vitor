@@ -36,6 +36,7 @@
 #include "types.h"
 #include "globals.h"
 #include "enemies.h"
+#include "effects.h"
 #include "movement.h"
 
 GLuint LoadTextureImage(const char *filename); // Função que carrega imagens de textura
@@ -279,6 +280,8 @@ GLint g_bbox_min_uniform;
 GLint g_bbox_max_uniform;
 GLint g_cube_colliding_uniform;
 GLint g_object_tint_uniform;
+GLint g_debug_color_uniform;
+GLint g_effect_alpha_uniform;
 
 // Número de texturas carregadas pela função LoadTextureImage()
 GLuint g_NumLoadedTextures = 0;
@@ -289,6 +292,7 @@ const int OBJECT_ID_DEBUG_CUBE = 6;
 const int OBJECT_ID_SPHERE = 0;
 const int OBJECT_ID_PROJECTILE = 5;
 const int OBJECT_ID_ENEMY = 7;
+const int OBJECT_ID_EFFECT = 8;
 
 glm::vec4 camera_position_c;
 glm::vec4 camera_lookat_l;
@@ -777,6 +781,7 @@ static void UpdateSlingshotProjectile(float delta_time)
 
     if (g_SlingshotProjectile.lifetime_seconds >= g_SlingshotProjectile.max_lifetime_seconds)
     {
+        SpawnSlingshotImpact(g_SlingshotProjectile.position);
         g_SlingshotProjectile.is_active = false;
         return;
     }
@@ -790,6 +795,8 @@ static void UpdateSlingshotProjectile(float delta_time)
             // TODO: Integrar dano do estilingue com o futuro sistema de ataque do jogador.
         }
 
+        // TODO: Usar ponto de contato e normal reais quando a colisao expuser esses dados.
+        SpawnSlingshotImpact(g_SlingshotProjectile.position);
         g_SlingshotProjectile.is_active = false;
     }
 }
@@ -1638,6 +1645,32 @@ int main()
     }
 
     const glm::vec4 sphere_model_center = (sphere_model_bbox_min + sphere_model_bbox_max) * 0.5f;
+    g_SphereRenderInfo = BuildRenderModelInfo(sphere_model, 1.0f);
+
+    std::vector<GLuint> smoke_effect_texture_ids;
+    std::vector<GLuint> smoke_effect_sampler_ids;
+    for (int i = 1; i <= 5; ++i)
+    {
+        char filename[64];
+        std::snprintf(filename, sizeof(filename), "FX001_%02d.png", i);
+        const std::string relative_from_bin = std::string("../../assets/effects/smoke/") + filename;
+        const std::string relative_from_root = std::string("assets/effects/smoke/") + filename;
+        const std::string path = ResolveScene00Path(relative_from_bin.c_str(), relative_from_root.c_str());
+        smoke_effect_texture_ids.push_back(LoadTextureImage(path.c_str()));
+        smoke_effect_sampler_ids.push_back(g_SamplerCache[path]);
+    }
+
+    std::vector<GLuint> spark_effect_texture_ids;
+    std::vector<GLuint> spark_effect_sampler_ids;
+    for (int i = 0; i <= 27; ++i)
+    {
+        const std::string filename = "vnbvq_" + std::to_string(i) + ".png";
+        const std::string relative_from_bin = std::string("../../assets/effects/sparks/") + filename;
+        const std::string relative_from_root = std::string("assets/effects/sparks/") + filename;
+        const std::string path = ResolveScene00Path(relative_from_bin.c_str(), relative_from_root.c_str());
+        spark_effect_texture_ids.push_back(LoadTextureImage(path.c_str()));
+        spark_effect_sampler_ids.push_back(g_SamplerCache[path]);
+    }
 
 
     ObjModel deku_baba_model(deku_baba_model_path.c_str());
@@ -1685,6 +1718,7 @@ int main()
     g_CameraYaw = g_PlayerYaw;
     g_CameraInitialized = false;
     InitializeEnemies(g_EnemySpawnAreaId);
+    ResetParticles();
 
     // Inicializamos o código para renderização de texto.
     TextRendering_Init();
@@ -1734,6 +1768,7 @@ int main()
 
         UpdateEnemies(delta_time, enemy_update_context);
         UpdateEnemyProjectiles(delta_time, enemy_update_context);
+        UpdateParticles(delta_time);
 
         // Aqui executamos as operações de renderização
 
@@ -1965,6 +2000,7 @@ int main()
             glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
             glUniform1i(g_object_id_uniform, OBJECT_ID_PROJECTILE);
             glUniform1i(g_cube_colliding_uniform, 0);
+            glUniform3f(g_object_tint_uniform, 0.65f, 0.85f, 1.0f);
             for (size_t i = 0; i < sphere_model_object_names.size(); ++i)
             {
                 DrawVirtualObject(sphere_model_object_names[i].c_str());
@@ -1972,6 +2008,19 @@ int main()
         }
 
         DrawEnemyProjectiles(enemy_draw_context);
+        ParticleDrawContext particle_draw_context;
+        particle_draw_context.model_uniform = g_model_uniform;
+        particle_draw_context.object_id_uniform = g_object_id_uniform;
+        particle_draw_context.cube_colliding_uniform = g_cube_colliding_uniform;
+        particle_draw_context.object_tint_uniform = g_object_tint_uniform;
+        particle_draw_context.effect_alpha_uniform = g_effect_alpha_uniform;
+        particle_draw_context.object_id_effect = OBJECT_ID_EFFECT;
+        particle_draw_context.camera_position = camera_position_c;
+        particle_draw_context.smoke_textures.texture_ids = smoke_effect_texture_ids;
+        particle_draw_context.smoke_textures.sampler_ids = smoke_effect_sampler_ids;
+        particle_draw_context.spark_textures.texture_ids = spark_effect_texture_ids;
+        particle_draw_context.spark_textures.sampler_ids = spark_effect_sampler_ids;
+        DrawParticles(particle_draw_context);
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
         glFrontFace(GL_CCW);
@@ -2224,6 +2273,8 @@ void LoadShadersFromFiles()
     g_bbox_max_uniform = glGetUniformLocation(g_GpuProgramID, "bbox_max");
     g_cube_colliding_uniform = glGetUniformLocation(g_GpuProgramID, "cube_colliding");
     g_object_tint_uniform = glGetUniformLocation(g_GpuProgramID, "object_tint");
+    g_debug_color_uniform = glGetUniformLocation(g_GpuProgramID, "debug_color");
+    g_effect_alpha_uniform = glGetUniformLocation(g_GpuProgramID, "effect_alpha");
 
     // Variáveis em "shader_fragment.glsl" para acesso das imagens de textura
     glUseProgram(g_GpuProgramID);
@@ -2231,6 +2282,7 @@ void LoadShadersFromFiles()
     glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage1"), 1);
     glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage2"), 2);
     glUniform3f(g_object_tint_uniform, 1.0f, 1.0f, 1.0f);
+    glUniform1f(g_effect_alpha_uniform, 1.0f);
     glUseProgram(0);
 }
 
