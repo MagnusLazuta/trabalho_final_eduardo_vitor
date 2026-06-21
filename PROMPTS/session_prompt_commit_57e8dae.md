@@ -139,3 +139,151 @@
 
   Input Verification Relocated: 
   Relocated input verification from movement.cpp to main.cpp using global state flags.
+
+▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  cria um sistema de debug onde desenha hitbox do personagem e a das ledder
+▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+
+  Debug Hitbox System: 
+  Creating a debug visualization system for character and ladder hitboxes using wireframe
+  AABB rendering.
+
+  ✓  ReadFile  globals.h → Found existing collision/movement globals
+  ✓  ReadFile  collision.h → Found CollisionShape struct with LADDER, VINES types
+  ✓  ReadFile  main.cpp → Read full rendering pipeline and shader setup
+  ✓  ReadFile  shader_fragment.glsl → Read fragment shader with object_id system
+  ✓  ReadFile  movement.cpp → Read ladder/vine collision detection logic
+
+  Updating Globals for Debug: Adding debug hitbox toggle flag.
+
+  ✓  Edit  globals.h → Accepted (+3, -1)
+
+      20 + extern bool g_CollidedWithAVine;
+      21 + extern bool g_CollidedWithALadder;
+      22 + 
+      23 + // Debug drawing
+      24 + extern bool g_ShowDebugHitboxes;
+
+  ✓  Edit  globals.cpp → Accepted (+2, -0)
+
+      19 + bool g_CollidedWithAVine = false;
+      20 + bool g_CollidedWithALadder = false;
+      21 + 
+      22 + bool g_ShowDebugHitboxes = false;
+
+  Building Debug Wireframe Cube: Creating wireframe cube mesh for AABB visualization.
+
+  ✓  Edit  main.cpp → Accepted (+65, -0)
+
+      // Debug drawing system
+      static GLuint g_DebugWireframeVAO = 0;
+      static GLuint g_DebugWireframeVBO = 0;
+      static GLuint g_DebugWireframeEBO = 0;
+      static int g_DebugWireframeIndexCount = 0;
+
+      void BuildDebugWireframeCube();
+      void DrawDebugAABB(const glm::vec4 &center, const glm::vec4 &half_extents, const glm::vec4 &color);
+
+      // BuildDebugWireframeCube: 8 vertices + 12 edges (24 indices for GL_LINES)
+      // DrawDebugAABB: Translates/scales unit cube to match AABB, draws wireframe
+
+  Adding Debug Object ID: Setting up DEBUG_CUBE constant and shader uniform.
+
+  ✓  Edit  main.cpp → Accepted (+1, -0)
+
+      const int OBJECT_ID_DEBUG_CUBE = 5;
+
+  ✓  Edit  shader_fragment.glsl → Accepted (+8, -2)
+
+      #define DEBUG_CUBE 5
+      uniform int cube_colliding;
+      uniform vec4 debug_color;
+      ...
+      else if ( object_id == DEBUG_CUBE )
+      {
+          Kd0 = debug_color.rgb;
+          alpha = debug_color.a;
+      }
+
+  Initializing Debug System: Building wireframe cube after shader load.
+
+  ✓  Edit  main.cpp → Accepted (+3, -0)
+
+      LoadShadersFromFiles();
+      + // Build debug wireframe cube for hitbox visualization
+      + BuildDebugWireframeCube();
+
+  Adding Debug Render Loop: Drawing hitboxes when debug mode is enabled.
+
+  ✓  Edit  main.cpp → Accepted (+45, -0)
+
+      // Debug drawing: render hitboxes if enabled
+      if (g_ShowDebugHitboxes)
+      {
+          glDisable(GL_DEPTH_TEST);
+          glDisable(GL_CULL_FACE);
+
+          // Draw player hitbox (green wireframe)
+          glm::vec4 player_color(0.0f, 1.0f, 0.0f, 1.0f);
+          DrawDebugAABB(g_PlayerCubePosition, g_PlayerCubeHalfExtents, player_color);
+
+          // Draw ladder hitboxes (yellow wireframe)
+          for (size_t i = 0; i < g_ScenarioCollisionShapes.size(); ++i)
+          {
+              if (g_ScenarioCollisionShapes[i].type == CollisionShapeType::LADDER)
+              {
+                  glm::vec4 ladder_center = (min + max) * 0.5f;
+                  glm::vec4 ladder_half = (max - min) * 0.5f;
+                  glm::vec4 ladder_color(1.0f, 1.0f, 0.0f, 1.0f);
+                  DrawDebugAABB(ladder_center, ladder_half, ladder_color);
+              }
+          }
+
+          // Draw vine hitboxes (magenta wireframe)
+          // ... similar loop for VINES type
+      }
+
+  Adding F1 Key Toggle: Enabling debug mode toggle.
+
+  ✓  Edit  main.cpp → Accepted (+7, -0)
+
+      // F1 toggles debug hitbox visualization
+      if (key == GLFW_KEY_F1 && action == GLFW_PRESS)
+      {
+          g_ShowDebugHitboxes = !g_ShowDebugHitboxes;
+          fprintf(stdout, "Debug hitboxes: %s\n", g_ShowDebugHitboxes ? "ON" : "OFF");
+      }
+
+  ✓  Build successful → Compiled and ran without errors
+  ✓  Runtime verified → Debug system initialized correctly
+
+  ✦ Implementado sistema completo de debug para visualização de hitboxes. O sistema permite
+    visualizar as caixas de colisão do personagem, escadas e videiras como wireframes
+    coloridos sobrepostos à cena.
+
+  Alterações realizadas:
+
+   1. include/globals.h: Adicionada flag g_ShowDebugHitboxes para controlar o modo debug.
+   2. src/globals.cpp: Flag inicializada como false (desligada por padrão).
+   3. src/main.cpp: 
+      - Criada malha wireframe unitária (BuildDebugWireframeCube) com 8 vértices e 12 arestas.
+      - Função DrawDebugAABB que desenha qualquer AABB como cubo wireframe colorido.
+      - Inicialização da malha wireframe após carregamento dos shaders.
+      - Loop de renderização debug que desenha:
+        * Verde: Hitbox do personagem (g_PlayerCubePosition + g_PlayerCubeHalfExtents)
+        * Amarelo: Hitbox de escadas (LADDER)
+        * Magenta: Hitbox de videiras (VINES)
+      - Tecla F1 para ligar/desligar o modo debug.
+   4. src/shader_fragment.glsl: 
+      - Definição DEBUG_CUBE = 5.
+      - Uniform debug_color para definir a cor do wireframe.
+
+  Como usar:
+
+   - Pressione F1 para ligar/desligar a visualização das hitboxes.
+   - As hitboxes são desenhadas como wireframes sobrepostos aos objetos.
+   - Profundidade e culling são desabilitados durante o debug para melhor visibilidade.
+
+
+  Debug Hitbox System Created: 
+  Debug visualization system for character and ladder/vine hitboxes implemented with wireframe AABB rendering.

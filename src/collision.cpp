@@ -254,3 +254,133 @@ static bool OverlapOnAxis(
 
     return !(tri_min > r || tri_max < -r);
 }
+
+static bool OverlapOnAxisObb(
+    const glm::vec4 &v0,
+    const glm::vec4 &v1,
+    const glm::vec4 &v2,
+    const glm::vec4 &axis,
+    const glm::vec4 *obb_axes,
+    const glm::vec4 &half_extents)
+{
+    const float eps = 1e-7f;
+    if (dotproduct(axis, axis) < eps)
+        return true;
+
+    const float p0 = dotproduct(v0, axis);
+    const float p1 = dotproduct(v1, axis);
+    const float p2 = dotproduct(v2, axis);
+    const float tri_min = std::min(p0, std::min(p1, p2));
+    const float tri_max = std::max(p0, std::max(p1, p2));
+
+    const float r =
+        half_extents.x * std::fabs(dotproduct(obb_axes[0], axis)) +
+        half_extents.y * std::fabs(dotproduct(obb_axes[1], axis)) +
+        half_extents.z * std::fabs(dotproduct(obb_axes[2], axis));
+
+    return !(tri_min > r || tri_max < -r);
+}
+
+bool TriangleIntersectsObb(const Triangle &triangle, const CollisionOBB &obb)
+{
+    const float c = std::cos(obb.yaw);
+    const float s = std::sin(obb.yaw);
+
+    const glm::vec4 obb_axes[3] = {
+        glm::vec4(c, 0.0f, -s, 0.0f),
+        glm::vec4(0.0f, 1.0f, 0.0f, 0.0f),
+        glm::vec4(s, 0.0f, c, 0.0f)};
+
+    const glm::vec4 v0 = triangle.v1 - obb.center;
+    const glm::vec4 v1 = triangle.v2 - obb.center;
+    const glm::vec4 v2 = triangle.v3 - obb.center;
+
+    const glm::vec4 e0 = v1 - v0;
+    const glm::vec4 e1 = v2 - v1;
+    const glm::vec4 e2 = v0 - v2;
+    const glm::vec4 edges[3] = {e0, e1, e2};
+
+    if (!OverlapOnAxisObb(v0, v1, v2, obb_axes[0], obb_axes, obb.half_extents))
+        return false;
+    if (!OverlapOnAxisObb(v0, v1, v2, obb_axes[1], obb_axes, obb.half_extents))
+        return false;
+    if (!OverlapOnAxisObb(v0, v1, v2, obb_axes[2], obb_axes, obb.half_extents))
+        return false;
+
+    const glm::vec4 tri_normal4 = crossproduct(e0, e1);
+    const glm::vec4 tri_normal(tri_normal4.x, tri_normal4.y, tri_normal4.z, 0.0f);
+    if (!OverlapOnAxisObb(v0, v1, v2, tri_normal, obb_axes, obb.half_extents))
+        return false;
+
+    for (int edge_index = 0; edge_index < 3; ++edge_index)
+    {
+        for (int axis_index = 0; axis_index < 3; ++axis_index)
+        {
+            const glm::vec4 axis4 = crossproduct(edges[edge_index], obb_axes[axis_index]);
+            const glm::vec4 axis(axis4.x, axis4.y, axis4.z, 0.0f);
+            if (!OverlapOnAxisObb(v0, v1, v2, axis, obb_axes, obb.half_extents))
+                return false;
+        }
+    }
+
+    return true;
+}
+
+CollisionAABB ComputeObbAabb(const CollisionOBB &obb)
+{
+    const float c = std::abs(std::cos(obb.yaw));
+    const float s = std::abs(std::sin(obb.yaw));
+
+    const glm::vec4 extent(
+        obb.half_extents.x * c + obb.half_extents.z * s,
+        obb.half_extents.y,
+        obb.half_extents.x * s + obb.half_extents.z * c,
+        0.0f);
+
+    return {obb.center - extent, obb.center + extent};
+}
+
+CollisionShapeType CollidesWithScenarioObb(const CollisionOBB &obb, const std::vector<CollisionShape> &g_ScenarioCollisionShapes)
+{
+    const CollisionAABB obb_aabb = ComputeObbAabb(obb);
+
+    for (size_t shape_index = 0; shape_index < g_ScenarioCollisionShapes.size(); ++shape_index)
+    {
+        const CollisionShape &shape = g_ScenarioCollisionShapes[shape_index];
+
+        CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
+        if (!AabbAabbIntersect(obb_aabb, shape_aabb))
+            continue;
+
+        for (size_t triangle_index = 0; triangle_index < shape.triangles.size(); ++triangle_index)
+        {
+            if (TriangleIntersectsObb(shape.triangles[triangle_index], obb))
+                return shape.type;
+        }
+    }
+
+    return CollisionShapeType::NONE;
+}
+
+bool IsCollidingWithTypeObb(const CollisionOBB &obb, const std::vector<CollisionShape> &g_ScenarioCollisionShapes, CollisionShapeType type)
+{
+    const CollisionAABB obb_aabb = ComputeObbAabb(obb);
+
+    for (size_t shape_index = 0; shape_index < g_ScenarioCollisionShapes.size(); ++shape_index)
+    {
+        const CollisionShape &shape = g_ScenarioCollisionShapes[shape_index];
+        if (shape.type != type)
+            continue;
+
+        CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
+        if (!AabbAabbIntersect(obb_aabb, shape_aabb))
+            continue;
+
+        for (size_t triangle_index = 0; triangle_index < shape.triangles.size(); ++triangle_index)
+        {
+            if (TriangleIntersectsObb(shape.triangles[triangle_index], obb))
+                return true;
+        }
+    }
+    return false;
+}

@@ -942,12 +942,17 @@ void DrawEnemies(const EnemyDrawContext &context)
             continue;
 
         const glm::mat4 model = BuildEnemyModelMatrix(enemy, context.render_resources);
+        const bool using_placeholder = IsEnemyUsingPlaceholder(enemy, context.render_resources);
         glUniformMatrix4fv(context.model_uniform, 1, GL_FALSE, glm::value_ptr(model));
         glUniform1i(
             context.object_id_uniform,
-            IsEnemyUsingPlaceholder(enemy, context.render_resources) ? context.object_id_sphere : context.object_id_enemy);
+            using_placeholder ? context.object_id_sphere : context.object_id_enemy);
         glUniform1i(context.cube_colliding_uniform, 0);
-        glUniform3f(context.object_tint_uniform, enemy.debug_color.x, enemy.debug_color.y, enemy.debug_color.z);
+        glUniform3f(
+            context.object_tint_uniform,
+            using_placeholder ? enemy.debug_color.x : 1.0f,
+            using_placeholder ? enemy.debug_color.y : 1.0f,
+            using_placeholder ? enemy.debug_color.z : 1.0f);
 
         for (std::size_t object_index = 0; object_index < render_info.object_names.size(); ++object_index)
             context.draw_virtual_object(render_info.object_names[object_index].c_str());
