@@ -35,6 +35,7 @@
 #include "collision.h"
 #include "types.h"
 #include "globals.h"
+#include "enemies.h"
 #include "movement.h"
 
 GLuint LoadTextureImage(const char *filename); // Função que carrega imagens de textura
@@ -264,6 +265,7 @@ GLint g_object_id_uniform;
 GLint g_bbox_min_uniform;
 GLint g_bbox_max_uniform;
 GLint g_cube_colliding_uniform;
+GLint g_object_tint_uniform;
 
 // Número de texturas carregadas pela função LoadTextureImage()
 GLuint g_NumLoadedTextures = 0;
@@ -272,6 +274,7 @@ const int OBJECT_ID_SCENARIO = 3;
 const int OBJECT_ID_PLAYER_CUBE = 4;
 const int OBJECT_ID_SPHERE = 0;
 const int OBJECT_ID_PROJECTILE = 5;
+const int OBJECT_ID_ENEMY = 6;
 
 glm::vec4 camera_position_c;
 glm::vec4 camera_lookat_l;
@@ -323,6 +326,31 @@ ProjectileState g_SlingshotProjectile = {
     0.08f,
     0.0f,
     3.0f};
+
+RenderModelInfo g_DekuBabaRenderInfo = {false, {}, glm::vec4(0.0f), 1.0f};
+RenderModelInfo g_DekuScrubRenderInfo = {false, {}, glm::vec4(0.0f), 1.0f};
+RenderModelInfo g_DekuScrubProjectileRenderInfo = {false, {}, glm::vec4(0.0f), 1.0f};
+RenderModelInfo g_QueenGohmaRenderInfo = {false, {}, glm::vec4(0.0f), 1.0f};
+RenderModelInfo g_SphereRenderInfo = {false, {}, glm::vec4(0.0f), 1.0f};
+
+static RenderModelInfo BuildRenderModelInfo(ObjModel &model, float desired_max_dimension)
+{
+    RenderModelInfo info = {true, {}, glm::vec4(0.0f), 1.0f};
+    glm::vec4 bbox_min, bbox_max;
+    ComputeObjBounds(&model, bbox_min, bbox_max);
+    info.center = (bbox_min + bbox_max) * 0.5f;
+
+    const glm::vec4 size = bbox_max - bbox_min;
+    const float max_dimension = std::max(size.x, std::max(size.y, size.z));
+    if (max_dimension > 1e-6f)
+        info.base_scale = desired_max_dimension / max_dimension;
+
+    info.object_names.reserve(model.shapes.size());
+    for (size_t i = 0; i < model.shapes.size(); ++i)
+        info.object_names.push_back(model.shapes[i].name);
+
+    return info;
+}
 
 glm::mat4 GetScenarioModelMatrix()
 {
@@ -415,18 +443,6 @@ static void QueueSlingshotShot()
     g_SlingshotState.charge_time_seconds = 0.0f;
 }
 
-static ProjectileCollisionResult QueryProjectileEnemyCollision(const ProjectileState &projectile)
-{
-    (void)projectile;
-    return {ProjectileCollisionTarget::NONE, CollisionShapeType::NONE, -1, -1};
-}
-
-static ProjectileCollisionResult QueryProjectileInteractiveCollision(const ProjectileState &projectile)
-{
-    (void)projectile;
-    return {ProjectileCollisionTarget::NONE, CollisionShapeType::NONE, -1, -1};
-}
-
 static ProjectileCollisionResult QueryProjectileCollision(const ProjectileState &projectile)
 {
     const glm::vec4 projectile_half_extents(projectile.radius, projectile.radius, projectile.radius, 0.0f);
@@ -438,11 +454,12 @@ static ProjectileCollisionResult QueryProjectileCollision(const ProjectileState 
         return {ProjectileCollisionTarget::SCENARIO, scenario_hit, -1, -1};
     }
 
-    const ProjectileCollisionResult enemy_hit = QueryProjectileEnemyCollision(projectile);
-    if (enemy_hit.target != ProjectileCollisionTarget::NONE)
-        return enemy_hit;
+    const int enemy_index = QueryEnemyHitByPlayerProjectile(projectile.position, projectile.radius);
+    if (enemy_index >= 0)
+        return {ProjectileCollisionTarget::ENEMY, CollisionShapeType::NONE, enemy_index, -1};
 
-    return QueryProjectileInteractiveCollision(projectile);
+    // TODO: Reintegrar colisÃ£o do estilingue com objetos interativos, se necessÃ¡rio.
+    return {ProjectileCollisionTarget::NONE, CollisionShapeType::NONE, -1, -1};
 }
 
 static void FireSlingshotProjectile(const glm::vec4 &camera_position, const glm::vec4 &view_direction)
@@ -480,9 +497,589 @@ static void UpdateSlingshotProjectile(float delta_time)
     const ProjectileCollisionResult hit_result = QueryProjectileCollision(g_SlingshotProjectile);
     if (hit_result.target != ProjectileCollisionTarget::NONE)
     {
+        if (hit_result.target == ProjectileCollisionTarget::ENEMY && hit_result.enemy_index >= 0)
+        {
+            ApplyPlayerProjectileDamageToEnemy(hit_result.enemy_index, 1);
+            // TODO: Integrar dano do estilingue com o futuro sistema de ataque do jogador.
+        }
+
         g_SlingshotProjectile.is_active = false;
     }
 }
+
+#if 0 // Lógica de inimigos migrada para src/enemies.cpp
+static void UpdateDekuScrub(Enemy &enemy, float delta_time)
+{
+    const glm::vec4 delta_to_player = g_PlayerCubePosition - enemy.position;
+    const float distance_to_player = DistanceXZ(enemy.position, g_PlayerCubePosition);
+
+    enemy.vulnerable = (enemy.state == EnemyState::Stunned);
+    enemy.yaw = ComputeYawToTarget(enemy.position, g_PlayerCubePosition);
+
+    if (enemy.attack_cooldown_timer > 0.0f)
+        enemy.attack_cooldown_timer = std::max(0.0f, enemy.attack_cooldown_timer - delta_time);
+
+    switch (enemy.state)
+    {
+    case EnemyState::Hidden:
+        enemy.visible = true;
+        enemy.position.y = enemy.spawn_position.y + DEKU_SCRUB_HIDDEN_HEIGHT;
+        if (distance_to_player <= enemy.detection_radius)
+        {
+            enemy.state = EnemyState::Aiming;
+            enemy.state_timer = 0.0f;
+        }
+        break;
+
+    case EnemyState::Aiming:
+        enemy.position.y = enemy.spawn_position.y;
+        if (distance_to_player > enemy.detection_radius * 1.4f)
+        {
+            enemy.state = EnemyState::Hidden;
+            enemy.state_timer = 0.0f;
+            break;
+        }
+
+        if (enemy.attack_cooldown_timer <= 0.0f && enemy.state_timer >= 0.8f)
+        {
+            enemy.state = EnemyState::Shooting;
+            enemy.state_timer = 0.0f;
+        }
+        break;
+
+    case EnemyState::Shooting:
+        enemy.position.y = enemy.spawn_position.y;
+        if (!enemy.has_spawned_helpers && enemy.state_timer >= 0.15f)
+        {
+            SpawnDekuScrubProjectile(enemy, delta_to_player);
+            enemy.has_spawned_helpers = true;
+        }
+
+        if (enemy.state_timer >= 0.45f)
+        {
+            enemy.has_spawned_helpers = false;
+            enemy.attack_cooldown_timer = enemy.attack_cooldown;
+            enemy.state = EnemyState::Aiming;
+            enemy.state_timer = 0.0f;
+        }
+        break;
+
+    case EnemyState::Stunned:
+        enemy.position.y = enemy.spawn_position.y;
+        enemy.vulnerable = true;
+        if (enemy.state_timer >= DEKU_SCRUB_STUN_DURATION)
+        {
+            enemy.state = EnemyState::Hidden;
+            enemy.state_timer = 0.0f;
+        }
+        break;
+
+    default:
+        enemy.state = EnemyState::Hidden;
+        enemy.state_timer = 0.0f;
+        break;
+    }
+
+    // TODO: Integrar reflexão do escudo para colocar o Deku Scrub em Stunned.
+}
+
+static void UpdateSkullwalltula(Enemy &enemy, float delta_time)
+{
+    (void)delta_time;
+    enemy.position.x = enemy.spawn_position.x + 0.12f * std::sin(enemy.animation_timer * 0.7f);
+    enemy.position.y = enemy.spawn_position.y;
+    enemy.yaw = ComputeYawToTarget(enemy.position, g_PlayerCubePosition);
+    enemy.vulnerable = true;
+
+    if (DistanceXZ(enemy.position, g_PlayerCubePosition) <= enemy.attack_radius)
+    {
+        LogPlayerHitByEnemy("Skullwalltula");
+        // TODO: Aplicar dano/knockback ao jogador ao aproximar de Skullwalltula.
+    }
+}
+
+static void UpdateBigSkulltula(Enemy &enemy, float delta_time)
+{
+    const glm::vec4 to_player = NormalizeXZ(g_PlayerCubePosition - enemy.position);
+    const glm::vec4 enemy_forward = ForwardFromYaw(enemy.yaw);
+    const float front_dot = dotproduct(enemy_forward, to_player);
+
+    enemy.yaw = WrapAnglePi(enemy.yaw + 0.55f * delta_time);
+    enemy.vulnerable = false;
+
+    switch (enemy.state)
+    {
+    case EnemyState::Idle:
+    case EnemyState::Turning:
+        enemy.state = EnemyState::Turning;
+        if (front_dot < -0.25f)
+        {
+            enemy.state = EnemyState::Vulnerable;
+            enemy.state_timer = 0.0f;
+        }
+        else if (DistanceXZ(enemy.position, g_PlayerCubePosition) <= enemy.attack_radius &&
+                 enemy.attack_cooldown_timer <= 0.0f)
+        {
+            enemy.state = EnemyState::Attacking;
+            enemy.state_timer = 0.0f;
+        }
+        break;
+
+    case EnemyState::Vulnerable:
+        enemy.vulnerable = true;
+        if (front_dot >= -0.05f || enemy.state_timer >= BIG_SKULLTULA_VULNERABLE_DURATION)
+        {
+            enemy.state = EnemyState::Turning;
+            enemy.state_timer = 0.0f;
+        }
+        break;
+
+    case EnemyState::Attacking:
+    {
+        const glm::vec4 dash = ForwardFromYaw(enemy.yaw) * (1.8f * delta_time);
+        MoveEnemyWithScenarioCollision(enemy, dash);
+
+        if (enemy.state_timer >= BIG_SKULLTULA_ATTACK_DURATION)
+        {
+            enemy.attack_cooldown_timer = enemy.attack_cooldown;
+            enemy.state = EnemyState::Vulnerable;
+            enemy.state_timer = 0.0f;
+        }
+
+        if (DistanceXZ(enemy.position, g_PlayerCubePosition) <= enemy.attack_radius + 0.45f)
+            LogPlayerHitByEnemy("Big Skulltula");
+        // TODO: Aplicar dano no contato da investida/giro quando houver vida do jogador.
+        break;
+    }
+
+    default:
+        enemy.state = EnemyState::Turning;
+        enemy.state_timer = 0.0f;
+        break;
+    }
+
+    if (enemy.attack_cooldown_timer > 0.0f)
+        enemy.attack_cooldown_timer = std::max(0.0f, enemy.attack_cooldown_timer - delta_time);
+}
+
+static void UpdateGohmaLarva(Enemy &enemy, float delta_time)
+{
+    const glm::vec4 delta_to_player = g_PlayerCubePosition - enemy.position;
+    const float distance_to_player = DistanceXZ(enemy.position, g_PlayerCubePosition);
+    enemy.vulnerable = true;
+
+    switch (enemy.state)
+    {
+    case EnemyState::Idle:
+        if (distance_to_player <= enemy.detection_radius)
+        {
+            enemy.state = EnemyState::Chasing;
+            enemy.state_timer = 0.0f;
+        }
+        break;
+
+    case EnemyState::Chasing:
+    {
+        const glm::vec4 direction = NormalizeXZ(delta_to_player);
+        enemy.yaw = ComputeYawToTarget(enemy.position, g_PlayerCubePosition);
+        MoveEnemyWithScenarioCollision(enemy, direction * (1.9f * delta_time));
+
+        if (distance_to_player <= enemy.attack_radius && enemy.attack_cooldown_timer <= 0.0f)
+        {
+            enemy.state = EnemyState::Jumping;
+            enemy.state_timer = 0.0f;
+            enemy.attack_cooldown_timer = enemy.attack_cooldown;
+        }
+        break;
+    }
+
+    case EnemyState::Jumping:
+    {
+        const glm::vec4 direction = NormalizeXZ(delta_to_player);
+        enemy.yaw = ComputeYawToTarget(enemy.position, g_PlayerCubePosition);
+        MoveEnemyWithScenarioCollision(enemy, direction * (3.6f * delta_time));
+
+        const float jump_progress = Clamp01(enemy.state_timer / GOHMA_LARVA_JUMP_DURATION);
+        enemy.position.y = enemy.spawn_position.y + std::sin(jump_progress * PI) * 0.45f;
+
+        if (enemy.state_timer >= GOHMA_LARVA_JUMP_DURATION)
+        {
+            enemy.position.y = enemy.spawn_position.y;
+            enemy.state = EnemyState::Chasing;
+            enemy.state_timer = 0.0f;
+        }
+
+        if (DistanceXZ(enemy.position, g_PlayerCubePosition) <= enemy.attack_radius + 0.35f &&
+            jump_progress >= 0.65f)
+            LogPlayerHitByEnemy("Gohma Larva");
+        // TODO: Aplicar dano/empurrão ao jogador na aterrissagem da larva.
+        break;
+    }
+
+    default:
+        enemy.state = EnemyState::Idle;
+        enemy.state_timer = 0.0f;
+        break;
+    }
+
+    if (enemy.attack_cooldown_timer > 0.0f)
+        enemy.attack_cooldown_timer = std::max(0.0f, enemy.attack_cooldown_timer - delta_time);
+}
+
+static void UpdateQueenGohma(Enemy &enemy, float delta_time)
+{
+    const float distance_to_player = DistanceXZ(enemy.position, g_PlayerCubePosition);
+    enemy.yaw = ComputeYawToTarget(enemy.position, g_PlayerCubePosition);
+    enemy.vulnerable = false;
+
+    switch (enemy.state)
+    {
+    case EnemyState::BossIdle:
+        if (enemy.state_timer >= 1.1f)
+        {
+            enemy.state = EnemyState::BossLookAtPlayer;
+            enemy.state_timer = 0.0f;
+        }
+        break;
+
+    case EnemyState::BossLookAtPlayer:
+        enemy.vulnerable = true; // olho exposto enquanto observa o jogador.
+        if (distance_to_player <= enemy.attack_radius && enemy.attack_cooldown_timer <= 0.0f)
+        {
+            enemy.state = EnemyState::BossAttack;
+            enemy.state_timer = 0.0f;
+        }
+        else if (enemy.state_timer >= 3.8f)
+        {
+            enemy.state = EnemyState::BossClimb;
+            enemy.state_timer = 0.0f;
+        }
+        break;
+
+    case EnemyState::BossAttack:
+    {
+        const glm::vec4 dash = ForwardFromYaw(enemy.yaw) * (2.1f * delta_time);
+        MoveEnemyWithScenarioCollision(enemy, dash);
+        enemy.vulnerable = (enemy.state_timer >= 0.55f);
+
+        if (enemy.state_timer >= 1.2f)
+        {
+            enemy.attack_cooldown_timer = 2.5f;
+            enemy.state = EnemyState::BossLookAtPlayer;
+            enemy.state_timer = 0.0f;
+        }
+
+        if (DistanceXZ(enemy.position, g_PlayerCubePosition) <= enemy.attack_radius + 0.80f)
+            LogPlayerHitByEnemy("Queen Gohma");
+        // TODO: Aplicar dano da investida da Queen Gohma no jogador.
+        break;
+    }
+
+    case EnemyState::BossClimb:
+        enemy.position.y = enemy.spawn_position.y + std::min(2.8f, enemy.state_timer * 1.6f);
+        if (enemy.state_timer >= 2.0f)
+        {
+            enemy.state = EnemyState::BossDropEggs;
+            enemy.state_timer = 0.0f;
+            enemy.has_spawned_helpers = false;
+        }
+        break;
+
+    case EnemyState::BossDropEggs:
+        enemy.position.y = enemy.spawn_position.y + 2.8f;
+        if (!enemy.has_spawned_helpers && enemy.state_timer >= 0.4f)
+        {
+            SpawnQueenGohmaEggWave(enemy);
+            enemy.has_spawned_helpers = true;
+        }
+
+        if (enemy.state_timer >= 1.6f)
+        {
+            enemy.state = EnemyState::BossAttack;
+            enemy.state_timer = 0.0f;
+            enemy.position.y = enemy.spawn_position.y;
+            enemy.has_spawned_helpers = false;
+        }
+        break;
+
+    case EnemyState::BossStunned:
+        enemy.vulnerable = true;
+        if (enemy.state_timer >= QUEEN_GOHMA_STUN_DURATION)
+        {
+            enemy.state = EnemyState::BossLookAtPlayer;
+            enemy.state_timer = 0.0f;
+        }
+        break;
+
+    case EnemyState::BossDead:
+        enemy.active = false;
+        enemy.visible = false;
+        break;
+
+    default:
+        enemy.state = EnemyState::BossIdle;
+        enemy.state_timer = 0.0f;
+        break;
+    }
+
+    if (enemy.attack_cooldown_timer > 0.0f)
+        enemy.attack_cooldown_timer = std::max(0.0f, enemy.attack_cooldown_timer - delta_time);
+}
+
+void InitializeEnemies()
+{
+    g_Enemies.clear();
+    g_PendingEnemySpawns.clear();
+    g_EnemyProjectiles.clear();
+    const float test_ground_y = g_HardcodedTestSpawnPosition.y - 4.0f;
+
+    Enemy deku_baba = MakeEnemy(
+        EnemyType::DEKU_BABA,
+        EnemyState::Idle,
+        glm::vec4(4.3f, test_ground_y, 2.4f, 1.0f),
+        glm::vec4(1.0f, 1.0f, 1.0f, 0.0f),
+        glm::vec4(0.45f, 0.95f, 0.45f, 0.0f),
+        2,
+        3.8f,
+        1.3f,
+        1.8f,
+        "Dekubaba");
+    deku_baba.debug_color = glm::vec4(0.42f, 0.82f, 0.28f, 1.0f);
+    g_Enemies.push_back(deku_baba);
+
+    Enemy withered = MakeEnemy(
+        EnemyType::WITHERED_DEKU_BABA,
+        EnemyState::Idle,
+        glm::vec4(0.9f, test_ground_y, 4.6f, 1.0f),
+        glm::vec4(0.72f, 0.72f, 0.72f, 0.0f),
+        glm::vec4(0.38f, 0.60f, 0.38f, 0.0f),
+        1,
+        0.0f,
+        0.0f,
+        0.0f,
+        "Dekubaba");
+    withered.yaw = 0.35f;
+    withered.timer_b = withered.yaw;
+    withered.debug_color = glm::vec4(0.70f, 0.62f, 0.38f, 1.0f);
+    g_Enemies.push_back(withered);
+
+    Enemy deku_scrub = MakeEnemy(
+        EnemyType::DEKU_SCRUB,
+        EnemyState::Hidden,
+        glm::vec4(6.8f, test_ground_y, -0.3f, 1.0f),
+        glm::vec4(1.0f, 1.0f, 1.0f, 0.0f),
+        glm::vec4(0.95f, 0.95f, 0.95f, 0.0f),
+        2,
+        6.2f,
+        5.5f,
+        1.7f,
+        "nodes_12__meshes[2]");
+    deku_scrub.debug_color = glm::vec4(0.86f, 0.58f, 0.22f, 1.0f);
+    g_Enemies.push_back(deku_scrub);
+
+    Enemy skullwalltula = MakeEnemy(
+        EnemyType::SKULLWALLTULA,
+        EnemyState::Idle,
+        glm::vec4(-1.9f, test_ground_y, 5.2f, 1.0f),
+        glm::vec4(1.20f, 1.20f, 1.20f, 0.0f),
+        glm::vec4(0.90f, 1.30f, 0.50f, 0.0f),
+        2,
+        0.0f,
+        1.1f,
+        0.0f,
+        "skullwalltula_placeholder");
+    skullwalltula.debug_color = glm::vec4(0.88f, 0.18f, 0.18f, 1.0f);
+    g_Enemies.push_back(skullwalltula);
+
+    Enemy big_skulltula = MakeEnemy(
+        EnemyType::BIG_SKULLTULA,
+        EnemyState::Turning,
+        glm::vec4(8.6f, test_ground_y, 5.1f, 1.0f),
+        glm::vec4(2.70f, 2.70f, 2.70f, 0.0f),
+        glm::vec4(1.40f, 1.50f, 1.40f, 0.0f),
+        3,
+        0.0f,
+        1.8f,
+        2.4f,
+        "big_skulltula_placeholder");
+    big_skulltula.debug_color = glm::vec4(0.96f, 0.58f, 0.14f, 1.0f);
+    g_Enemies.push_back(big_skulltula);
+
+    Enemy larva = MakeEnemy(
+        EnemyType::GOHMA_LARVA,
+        EnemyState::Idle,
+        glm::vec4(10.2f, test_ground_y, 2.0f, 1.0f),
+        glm::vec4(1.44f, 1.44f, 1.44f, 0.0f),
+        glm::vec4(0.64f, 0.40f, 0.64f, 0.0f),
+        2,
+        5.5f,
+        1.0f,
+        1.8f,
+        "gohma_larva_placeholder");
+    larva.vulnerable = true;
+    larva.debug_color = glm::vec4(0.25f, 0.82f, 0.36f, 1.0f);
+    g_Enemies.push_back(larva);
+
+    Enemy queen_gohma = MakeEnemy(
+        EnemyType::QUEEN_GOHMA,
+        EnemyState::BossIdle,
+        glm::vec4(13.8f, test_ground_y, -1.6f, 1.0f),
+        glm::vec4(1.0f, 1.0f, 1.0f, 0.0f),
+        glm::vec4(1.45f, 1.25f, 1.45f, 0.0f),
+        8,
+        12.0f,
+        3.2f,
+        2.5f,
+        "Queen_Gohma");
+    queen_gohma.yaw = -PI * 0.5f;
+    queen_gohma.debug_color = glm::vec4(0.62f, 0.25f, 0.22f, 1.0f);
+    g_Enemies.push_back(queen_gohma);
+}
+
+void UpdateEnemy(size_t enemy_index, float delta_time)
+{
+    Enemy &enemy = g_Enemies[enemy_index];
+    if (!enemy.active || enemy.dead)
+        return;
+
+    enemy.state_timer += delta_time;
+    enemy.animation_timer += delta_time;
+
+    switch (enemy.type)
+    {
+    case EnemyType::DEKU_BABA:
+        UpdateDekuBaba(enemy, delta_time);
+        break;
+    case EnemyType::WITHERED_DEKU_BABA:
+        UpdateWitheredDekuBaba(enemy, delta_time);
+        break;
+    case EnemyType::DEKU_SCRUB:
+        UpdateDekuScrub(enemy, delta_time);
+        break;
+    case EnemyType::SKULLWALLTULA:
+        UpdateSkullwalltula(enemy, delta_time);
+        break;
+    case EnemyType::BIG_SKULLTULA:
+        UpdateBigSkulltula(enemy, delta_time);
+        break;
+    case EnemyType::GOHMA_LARVA:
+        UpdateGohmaLarva(enemy, delta_time);
+        break;
+    case EnemyType::QUEEN_GOHMA:
+        UpdateQueenGohma(enemy, delta_time);
+        break;
+    }
+}
+
+void UpdateEnemies(float delta_time)
+{
+    if (g_PlayerHitLogCooldown > 0.0f)
+        g_PlayerHitLogCooldown = std::max(0.0f, g_PlayerHitLogCooldown - delta_time);
+
+    for (size_t i = 0; i < g_Enemies.size(); ++i)
+        UpdateEnemy(i, delta_time);
+
+    if (!g_PendingEnemySpawns.empty())
+    {
+        g_Enemies.insert(g_Enemies.end(), g_PendingEnemySpawns.begin(), g_PendingEnemySpawns.end());
+        g_PendingEnemySpawns.clear();
+    }
+}
+
+void UpdateEnemyProjectiles(float delta_time)
+{
+    for (size_t i = 0; i < g_EnemyProjectiles.size(); ++i)
+    {
+        EnemyProjectile &projectile = g_EnemyProjectiles[i];
+        if (!projectile.active)
+            continue;
+
+        projectile.position += projectile.velocity * delta_time;
+        projectile.lifetime_seconds += delta_time;
+
+        const glm::vec4 projectile_half_extents = projectile.scale;
+        const CollisionShapeType scenario_hit =
+            CollidesWithScenario(projectile.position, g_ScenarioCollisionShapes, projectile_half_extents);
+
+        if (projectile.lifetime_seconds >= projectile.max_lifetime_seconds ||
+            scenario_hit == CollisionShapeType::SOLID ||
+            scenario_hit == CollisionShapeType::DOOR)
+        {
+            projectile.active = false;
+            continue;
+        }
+
+        if (BoxesIntersect(g_PlayerCubePosition, g_PlayerCubeHalfExtents, projectile.position, projectile_half_extents))
+        {
+            projectile.active = false;
+            LogPlayerHitByEnemy("projétil inimigo");
+            // TODO: Integrar dano no jogador e reflexão de escudo para projéteis inimigos.
+        }
+    }
+}
+
+void DrawEnemies()
+{
+    for (size_t i = 0; i < g_Enemies.size(); ++i)
+    {
+        const Enemy &enemy = g_Enemies[i];
+        if (!enemy.active || enemy.dead || !enemy.visible)
+            continue;
+
+        const RenderModelInfo &render_info = GetEnemyRenderInfo(enemy);
+        if (!render_info.available || render_info.object_names.empty())
+            continue;
+
+        const glm::mat4 model = BuildEnemyModelMatrix(enemy);
+        glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+        glUniform1i(
+            g_object_id_uniform,
+            IsEnemyUsingPlaceholder(enemy) ? OBJECT_ID_SPHERE : OBJECT_ID_ENEMY);
+        glUniform1i(g_cube_colliding_uniform, 0);
+        glUniform3f(g_object_tint_uniform, enemy.debug_color.x, enemy.debug_color.y, enemy.debug_color.z);
+
+        for (size_t object_index = 0; object_index < render_info.object_names.size(); ++object_index)
+            DrawVirtualObject(render_info.object_names[object_index].c_str());
+    }
+}
+
+void DrawEnemyProjectiles()
+{
+    const RenderModelInfo &render_info =
+        g_DekuScrubProjectileRenderInfo.available ? g_DekuScrubProjectileRenderInfo : g_SphereRenderInfo;
+
+    if (!render_info.available || render_info.object_names.empty())
+        return;
+
+    for (size_t i = 0; i < g_EnemyProjectiles.size(); ++i)
+    {
+        const EnemyProjectile &projectile = g_EnemyProjectiles[i];
+        if (!projectile.active)
+            continue;
+
+        glm::mat4 model =
+            Matrix_Translate(projectile.position.x, projectile.position.y, projectile.position.z) *
+            Matrix_Scale(
+                projectile.scale.x * render_info.base_scale,
+                projectile.scale.y * render_info.base_scale,
+                projectile.scale.z * render_info.base_scale);
+
+        if (render_info.available)
+            model = model * Matrix_Translate(-render_info.center.x, -render_info.center.y, -render_info.center.z);
+
+        glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+        glUniform1i(
+            g_object_id_uniform,
+            g_DekuScrubProjectileRenderInfo.available ? OBJECT_ID_SCENARIO : OBJECT_ID_PROJECTILE);
+        glUniform1i(g_cube_colliding_uniform, 0);
+        glUniform3f(g_object_tint_uniform, 0.85f, 0.68f, 0.30f);
+
+        for (size_t object_index = 0; object_index < render_info.object_names.size(); ++object_index)
+            DrawVirtualObject(render_info.object_names[object_index].c_str());
+    }
+}
+
+#endif
 
 struct FairyMotionParams
 {
@@ -658,6 +1255,10 @@ int main()
     const std::string scene_collision_path = ResolveScene00Path(g_SceneCollisionPath, "assets/scenes/scene00/collision.obj");
     const std::string player_model_path = ResolveScene00Path("../../assets/char/childlink_v2.obj", "assets/char/childlink_v2.obj");
     const std::string fairy_model_path = ResolveScene00Path("../../data/sphere.obj", "data/sphere.obj");
+    const std::string deku_baba_model_path = ResolveScene00Path("../../assets/enemies/Deku Baba/Deku Baba/Dekubaba.obj", "assets/enemies/Deku Baba/Deku Baba/Dekubaba.obj");
+    const std::string deku_scrub_model_path = ResolveScene00Path("../../assets/enemies/Deku Scrub/Deku Scrub (Forest Stage).obj", "assets/enemies/Deku Scrub/Deku Scrub (Forest Stage).obj");
+    const std::string deku_scrub_projectile_model_path = ResolveScene00Path("../../assets/enemies/Deku Scrub/dnk_ball_model/dnk_ball_model.obj", "assets/enemies/Deku Scrub/dnk_ball_model/dnk_ball_model.obj");
+    const std::string queen_gohma_model_path = ResolveScene00Path("../../assets/enemies/Boss Queen Gohma/Queen Gohma/Queen Gohma.obj", "assets/enemies/Boss Queen Gohma/Queen Gohma/Queen Gohma.obj");
 
     // Carregamos o mapa da cena para renderização.
     ObjModel scenario_map_model(scene_map_path.c_str());
@@ -707,20 +1308,30 @@ int main()
     ObjModel fairy_model(fairy_model_path.c_str());
     ComputeNormals(&fairy_model);
     BuildTrianglesAndAddToVirtualScene(&fairy_model);
-    glm::vec4 fairy_model_bbox_min, fairy_model_bbox_max;
-    ComputeObjBounds(&fairy_model, fairy_model_bbox_min, fairy_model_bbox_max);
+    g_SphereRenderInfo = BuildRenderModelInfo(fairy_model, 0.22f);
+    const std::vector<std::string> fairy_model_object_names = g_SphereRenderInfo.object_names;
+    const glm::vec4 fairy_model_center = g_SphereRenderInfo.center;
+    const float fairy_model_scale = g_SphereRenderInfo.base_scale;
 
-    std::vector<std::string> fairy_model_object_names;
-    fairy_model_object_names.reserve(fairy_model.shapes.size());
-    for (size_t i = 0; i < fairy_model.shapes.size(); ++i)
-    {
-        fairy_model_object_names.push_back(fairy_model.shapes[i].name);
-    }
+    ObjModel deku_baba_model(deku_baba_model_path.c_str());
+    ComputeNormals(&deku_baba_model);
+    BuildTrianglesAndAddToVirtualScene(&deku_baba_model);
+    g_DekuBabaRenderInfo = BuildRenderModelInfo(deku_baba_model, 1.9f);
 
-    const glm::vec4 fairy_model_center = (fairy_model_bbox_min + fairy_model_bbox_max) * 0.5f;
-    const glm::vec4 fairy_model_size = fairy_model_bbox_max - fairy_model_bbox_min;
-    const float fairy_model_max_dimension = std::max(fairy_model_size.x, std::max(fairy_model_size.y, fairy_model_size.z));
-    const float fairy_model_scale = (fairy_model_max_dimension > 1e-6f) ? (0.22f / fairy_model_max_dimension) : 1.0f;
+    ObjModel deku_scrub_model(deku_scrub_model_path.c_str());
+    ComputeNormals(&deku_scrub_model);
+    BuildTrianglesAndAddToVirtualScene(&deku_scrub_model);
+    g_DekuScrubRenderInfo = BuildRenderModelInfo(deku_scrub_model, 1.5f);
+
+    ObjModel deku_scrub_projectile_model(deku_scrub_projectile_model_path.c_str());
+    ComputeNormals(&deku_scrub_projectile_model);
+    BuildTrianglesAndAddToVirtualScene(&deku_scrub_projectile_model);
+    g_DekuScrubProjectileRenderInfo = BuildRenderModelInfo(deku_scrub_projectile_model, 0.35f);
+
+    ObjModel queen_gohma_model(queen_gohma_model_path.c_str());
+    ComputeNormals(&queen_gohma_model);
+    BuildTrianglesAndAddToVirtualScene(&queen_gohma_model);
+    g_QueenGohmaRenderInfo = BuildRenderModelInfo(queen_gohma_model, 3.1f);
 
     // Alinha collision.obj ao espaço do map.obj (centro + escala).
     // NOTA: Esta lógica automática foi desabilitada pois estava causando desalinhamento
@@ -735,6 +1346,7 @@ int main()
     g_PlayerYaw = 0.0f;
     g_CameraYaw = g_PlayerYaw;
     g_CameraInitialized = false;
+    InitializeEnemies(g_HardcodedTestSpawnPosition);
 
     // Inicializamos o código para renderização de texto.
     TextRendering_Init();
@@ -770,6 +1382,14 @@ int main()
         }
 
         float move_input = UpdatePlayerMovement(window, delta_time);
+
+        EnemyUpdateContext enemy_update_context;
+        enemy_update_context.player_position = g_PlayerCubePosition;
+        enemy_update_context.player_half_extents = g_PlayerCubeHalfExtents;
+        enemy_update_context.scenario_collision_shapes = &g_ScenarioCollisionShapes;
+
+        UpdateEnemies(delta_time, enemy_update_context);
+        UpdateEnemyProjectiles(delta_time, enemy_update_context);
 
         // Aqui executamos as operações de renderização
 
@@ -831,7 +1451,7 @@ int main()
 
         else if (g_FirstPersonCamera)
         {
-            PrintVector(g_PositionCameraFirstPerson);
+            //PrintVector(g_PositionCameraFirstPerson);
             glm::vec4 offset = ComputeFirstPersonCameraOffset();
 
             camera_position_c = g_PlayerCubePosition + offset;
@@ -904,6 +1524,7 @@ int main()
         glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
         glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
         glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
+        glUniform3f(g_object_tint_uniform, 1.0f, 1.0f, 1.0f);
         for (size_t i = 0; i < g_ScenarioObjectNames.size(); ++i)
         {
             DrawVirtualObject(g_ScenarioObjectNames[i].c_str());
@@ -921,10 +1542,29 @@ int main()
         glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
         glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
         glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
+        glUniform3f(g_object_tint_uniform, 1.0f, 1.0f, 1.0f);
         for (size_t i = 0; i < player_model_object_names.size(); ++i)
         {
             DrawVirtualObject(player_model_object_names[i].c_str());
         }
+
+        EnemyDrawContext enemy_draw_context;
+        enemy_draw_context.model_uniform = g_model_uniform;
+        enemy_draw_context.object_id_uniform = g_object_id_uniform;
+        enemy_draw_context.cube_colliding_uniform = g_cube_colliding_uniform;
+        enemy_draw_context.object_tint_uniform = g_object_tint_uniform;
+        enemy_draw_context.object_id_scenario = OBJECT_ID_SCENARIO;
+        enemy_draw_context.object_id_sphere = OBJECT_ID_SPHERE;
+        enemy_draw_context.object_id_projectile = OBJECT_ID_PROJECTILE;
+        enemy_draw_context.object_id_enemy = OBJECT_ID_ENEMY;
+        enemy_draw_context.render_resources.deku_baba_render_info = &g_DekuBabaRenderInfo;
+        enemy_draw_context.render_resources.deku_scrub_render_info = &g_DekuScrubRenderInfo;
+        enemy_draw_context.render_resources.deku_scrub_projectile_render_info = &g_DekuScrubProjectileRenderInfo;
+        enemy_draw_context.render_resources.queen_gohma_render_info = &g_QueenGohmaRenderInfo;
+        enemy_draw_context.render_resources.sphere_render_info = &g_SphereRenderInfo;
+        enemy_draw_context.draw_virtual_object = DrawVirtualObject;
+
+        DrawEnemies(enemy_draw_context);
 
         const float fairy_orbit_progress = std::fmod(static_cast<float>(current_frame_time) / g_FairyMotionParams.orbit_period_seconds, 1.0f);
         const glm::vec4 fairy_head_center = g_PlayerCubePosition + glm::vec4(0.0f, g_FairyMotionParams.head_height_offset, 0.0f, 0.0f);
@@ -938,6 +1578,7 @@ int main()
         glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
         glUniform1i(g_object_id_uniform, OBJECT_ID_SPHERE);
         glUniform1i(g_cube_colliding_uniform, 0);
+        glUniform3f(g_object_tint_uniform, 0.55f, 0.95f, 0.70f);
         for (size_t i = 0; i < fairy_model_object_names.size(); ++i)
         {
             DrawVirtualObject(fairy_model_object_names[i].c_str());
@@ -953,11 +1594,14 @@ int main()
             glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
             glUniform1i(g_object_id_uniform, OBJECT_ID_PROJECTILE);
             glUniform1i(g_cube_colliding_uniform, 0);
+            glUniform3f(g_object_tint_uniform, 0.46f, 0.28f, 0.12f);
             for (size_t i = 0; i < fairy_model_object_names.size(); ++i)
             {
                 DrawVirtualObject(fairy_model_object_names[i].c_str());
             }
         }
+
+        DrawEnemyProjectiles(enemy_draw_context);
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
         glFrontFace(GL_CCW);
@@ -1135,12 +1779,14 @@ void LoadShadersFromFiles()
     g_bbox_min_uniform = glGetUniformLocation(g_GpuProgramID, "bbox_min");
     g_bbox_max_uniform = glGetUniformLocation(g_GpuProgramID, "bbox_max");
     g_cube_colliding_uniform = glGetUniformLocation(g_GpuProgramID, "cube_colliding");
+    g_object_tint_uniform = glGetUniformLocation(g_GpuProgramID, "object_tint");
 
     // Variáveis em "shader_fragment.glsl" para acesso das imagens de textura
     glUseProgram(g_GpuProgramID);
     glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage0"), 0);
     glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage1"), 1);
     glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage2"), 2);
+    glUniform3f(g_object_tint_uniform, 1.0f, 1.0f, 1.0f);
     glUseProgram(0);
 }
 

@@ -128,8 +128,8 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     if (g_IsClimbingAVine && !g_CollidedWithAVine) g_IsClimbingAVine = false;
     if (g_IsClimbingALadder && !g_CollidedWithALadder) g_IsClimbingALadder = false;
 
-    printf(g_CollidedWithAVine ? "Colidiu com videira!\n" : "Não colidiu com videira.\n");
-    printf(g_CollidedWithALadder ? "Colidiu com escada!\n" : "Não colidiu com escada.\n");
+    //printf(g_CollidedWithAVine ? "Colidiu com videira!\n" : "Não colidiu com videira.\n");
+    //printf(g_CollidedWithALadder ? "Colidiu com escada!\n" : "Não colidiu com escada.\n");
 
     glfwSetWindowTitle(
         window,

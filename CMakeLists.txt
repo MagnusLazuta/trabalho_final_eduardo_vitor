@@ -15,6 +15,7 @@ set(SOURCES
   src/glad.c
   src/globals.cpp
   src/movement.cpp
+  src/enemies.cpp
 )
 
 cmake_minimum_required(VERSION 3.5.0)
