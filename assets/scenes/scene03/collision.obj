@@ -1,6 +1,6 @@
 # Blender 5.1.1
 # www.blender.org
-mtllib collision.mtl
+mtllib map.mtl
 o inside_the_deku_tree_03.dmx
 v -4.902710 -11.042027 6.834190
 v 1.211973 -10.460566 11.833661

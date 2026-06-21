@@ -122,7 +122,7 @@ void PopMatrix(glm::mat4 &M);
 
 // Declaração de várias funções utilizadas em main().  Essas estão definidas
 // logo após a definição de main() neste arquivo.
-void BuildTrianglesAndAddToVirtualScene(ObjModel *);                          // Constrói representação de um ObjModel como malha de triângulos para renderização
+void BuildTrianglesAndAddToVirtualScene(ObjModel *, GLuint default_texture_id = 0); // Constrói representação de um ObjModel como malha de triângulos para renderização
 void BuildTrianglesFromAssimpAndAddToVirtualScene(AssimpModelLoader &loader); // Constrói representação de um modelo Assimp como malha de triângulos para renderização
 void ComputeNormals(ObjModel *model);                                         // Computa normais de um ObjModel, caso não existam.
 void LoadShadersFromFiles();                                                  // Carrega os shaders de vértice e fragmento, criando um programa de GPU
@@ -134,6 +134,9 @@ GLuint CreateGpuProgram(GLuint vertex_shader_id, GLuint fragment_shader_id);  //
 void PrintObjModelInfo(ObjModel *);                                           // Função para debugging
 void BuildUnitCubeAndAddToVirtualScene(const char *object_name);              // Constrói cubo unitário para teste de colisão
 void BuildCollisionDataFromObjModel(ObjModel *model, glm::mat4 model_matrix); // Constrói dados de colisão para o cenário
+void BuildCollisionDataIntoVector(ObjModel *model, glm::mat4 model_matrix,
+    std::vector<CollisionShape> &out_shapes,
+    glm::vec4 &out_bbox_min, glm::vec4 &out_bbox_max); // Variante que armazena em vetor externo
 void ComputeObjBounds(ObjModel *model, glm::vec4 &bbox_min, glm::vec4 &bbox_max);
 glm::vec4 ComputeCameraPositionWithCollision(const glm::vec4 &lookat_position, const glm::vec4 &desired_camera_position);
 
@@ -194,6 +197,20 @@ static std::map<std::string, GLuint> g_SamplerCache;
 std::stack<glm::mat4> g_MatrixStack;
 std::vector<std::string> g_ScenarioObjectNames;
 
+// Estrutura que representa uma parte do mapa (scene00 a scene11).
+struct ScenePart
+{
+    std::string name;                               // "scene00", "scene01", ...
+    std::vector<std::string> render_object_names;   // Nomes dos objetos no g_VirtualScene
+    std::vector<CollisionShape> collision_shapes;    // Shapes de colisao desta parte
+    glm::vec4 bbox_min, bbox_max;                   // AABB em world-space
+    std::vector<size_t> adjacent_indices;            // Indices das cenas adjacentes
+};
+
+std::vector<ScenePart> g_SceneParts;
+std::vector<size_t> g_CurrentActiveSceneIndices;
+GLuint g_DefaultGrayTextureID = 0;
+
 // Declaração desta variável foram movidas para globals.h
 // static std::vector<CollisionShape> g_ScenarioCollisionShapes;
 
@@ -204,7 +221,7 @@ glm::mat4 g_ScenarioModelMatrix = Matrix_Identity();
 const char *g_SceneMapPath = "../../assets/scenes/scene00/map.obj";
 const char *g_SceneCollisionPath = "../../assets/scenes/scene00/collision.obj";
 
-static const glm::vec4 g_HardcodedTestSpawnPosition(2.46f, 4.80f, 1.28f, 1.0f);
+static const glm::vec4 g_HardcodedTestSpawnPosition(15.0f, 0.75f, -0.26f, 1.0f);
 
 // Razão de proporção da janela (largura/altura). Veja função FramebufferSizeCallback().
 float g_ScreenRatio = 1.0f;
@@ -956,36 +973,195 @@ int main()
     LoadTextureImage("../../data/red_brick_diff_1k.jpg");        // TextureImage0
     LoadTextureImage("../../data/rocky_terrain_02_diff_1k.jpg"); // TextureImage1
 
-    // Path do mapa
-    const std::string scene_map_path = ResolveScene00Path(g_SceneMapPath, "assets/scenes/scene00/map.obj");
-    const std::string scene_collision_path = ResolveScene00Path(g_SceneCollisionPath, "assets/scenes/scene00/collision.obj");
-    const std::string player_model_path = ResolveScene00Path("../../Sword and Shield Pack/childlink_v2_clean.fbx", "Sword and Shield Pack/childlink_v2_clean.fbx");
-    const std::string fairy_model_path = ResolveScene00Path("../../assets/navi/Navi.obj", "assets/navi/Navi.obj");
-
-    // Carregamos o mapa da cena para renderização.
-    ObjModel scenario_map_model(scene_map_path.c_str());
-    ComputeNormals(&scenario_map_model);
-
-    // Calcula a o AABB do mapa da cena
-    glm::vec4 map_bbox_min, map_bbox_max;
-    ComputeObjBounds(&scenario_map_model, map_bbox_min, map_bbox_max);
-
-    // Sem transformação: usa coordenadas originais da scene00.
-    g_ScenarioModelMatrix = Matrix_Identity();
-
-    BuildTrianglesAndAddToVirtualScene(&scenario_map_model);
-
-    g_ScenarioObjectNames.clear();
-    for (size_t i = 0; i < scenario_map_model.shapes.size(); ++i)
+    // Textura 1x1 cinza padrao para objetos de cena sem textura (Kd = 0.8, 0.8, 0.8)
     {
-        g_ScenarioObjectNames.push_back(scenario_map_model.shapes[i].name);
+        glGenTextures(1, &g_DefaultGrayTextureID);
+        glBindTexture(GL_TEXTURE_2D, g_DefaultGrayTextureID);
+        const unsigned char gray[4] = {204, 204, 204, 255}; // 0.8 * 255 = 204
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, gray);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glBindTexture(GL_TEXTURE_2D, 0);
     }
 
-    // Carregamos o modelo de colisão da cena (se não existir, usa o próprio mapa).
-    ObjModel scenario_collision_model(scene_collision_path.c_str());
-    ComputeNormals(&scenario_collision_model);
-    glm::vec4 collision_bbox_min, collision_bbox_max;
-    ComputeObjBounds(&scenario_collision_model, collision_bbox_min, collision_bbox_max);
+    // Carregamos todas as 12 partes do mapa (scene00 a scene11).
+    g_SceneParts.clear();
+    g_ScenarioModelMatrix = Matrix_Identity();
+    g_ScenarioBoundsMin = glm::vec4(+std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), 1.0f);
+    g_ScenarioBoundsMax = glm::vec4(-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), 1.0f);
+
+    for (int scene_idx = 0; scene_idx < 12; ++scene_idx)
+    {
+        char buf[256];
+        char buf_bin[256];
+        snprintf(buf, sizeof(buf), "assets/scenes/scene%02d/map.obj", scene_idx);
+        snprintf(buf_bin, sizeof(buf_bin), "../../assets/scenes/scene%02d/map.obj", scene_idx);
+        const std::string map_path = ResolveScene00Path(buf_bin, buf);
+        snprintf(buf, sizeof(buf), "assets/scenes/scene%02d/collision.obj", scene_idx);
+        snprintf(buf_bin, sizeof(buf_bin), "../../assets/scenes/scene%02d/collision.obj", scene_idx);
+        const std::string col_path = ResolveScene00Path(buf_bin, buf);
+
+        printf("\n=== Carregando cena scene%02d ===\n", scene_idx);
+
+        ScenePart part;
+        snprintf(buf, sizeof(buf), "scene%02d", scene_idx);
+        part.name = buf;
+
+        // --- Carrega mapa visual ---
+        ObjModel map_model(map_path.c_str());
+        ComputeNormals(&map_model);
+
+        // Prefixa nomes das shapes para evitar colisoes no g_VirtualScene
+        std::string prefix = part.name + "_";
+        std::vector<std::string> original_names;
+        original_names.reserve(map_model.shapes.size());
+        for (auto &shape : map_model.shapes)
+        {
+            original_names.push_back(shape.name);
+            shape.name = prefix + shape.name;
+        }
+
+        BuildTrianglesAndAddToVirtualScene(&map_model, g_DefaultGrayTextureID);
+
+        // Coleta todos os sub-objetos gerados (cada face group vira um _grpN)
+        for (auto &[name, obj] : g_VirtualScene)
+        {
+            if (name.compare(0, prefix.size(), prefix) == 0)
+                part.render_object_names.push_back(name);
+        }
+
+        // Computa AABB da cena a partir dos vertices do map.obj
+        {
+            const float maxval = std::numeric_limits<float>::max();
+            part.bbox_min = glm::vec4(+maxval, +maxval, +maxval, 1.0f);
+            part.bbox_max = glm::vec4(-maxval, -maxval, -maxval, 1.0f);
+            for (size_t v = 0; v < map_model.attrib.vertices.size(); v += 3)
+            {
+                const float vx = map_model.attrib.vertices[v + 0];
+                const float vy = map_model.attrib.vertices[v + 1];
+                const float vz = map_model.attrib.vertices[v + 2];
+                part.bbox_min.x = std::min(part.bbox_min.x, vx);
+                part.bbox_min.y = std::min(part.bbox_min.y, vy);
+                part.bbox_min.z = std::min(part.bbox_min.z, vz);
+                part.bbox_max.x = std::max(part.bbox_max.x, vx);
+                part.bbox_max.y = std::max(part.bbox_max.y, vy);
+                part.bbox_max.z = std::max(part.bbox_max.z, vz);
+            }
+        }
+
+        printf("  AABB: [%.1f,%.1f,%.1f] a [%.1f,%.1f,%.1f]\n",
+               part.bbox_min.x, part.bbox_min.y, part.bbox_min.z,
+               part.bbox_max.x, part.bbox_max.y, part.bbox_max.z);
+
+        // --- Carrega colisao ---
+        {
+            ObjModel col_model(col_path.c_str());
+            ComputeNormals(&col_model);
+            glm::vec4 col_bbox_min, col_bbox_max;
+            BuildCollisionDataIntoVector(&col_model, Matrix_Identity(),
+                part.collision_shapes, col_bbox_min, col_bbox_max);
+        }
+
+        printf("  Shapes de colisao: %zu, objetos visuais: %zu\n",
+               part.collision_shapes.size(), part.render_object_names.size());
+
+        // Atualiza bounds globais
+        g_ScenarioBoundsMin.x = std::min(g_ScenarioBoundsMin.x, part.bbox_min.x);
+        g_ScenarioBoundsMin.y = std::min(g_ScenarioBoundsMin.y, part.bbox_min.y);
+        g_ScenarioBoundsMin.z = std::min(g_ScenarioBoundsMin.z, part.bbox_min.z);
+        g_ScenarioBoundsMax.x = std::max(g_ScenarioBoundsMax.x, part.bbox_max.x);
+        g_ScenarioBoundsMax.y = std::max(g_ScenarioBoundsMax.y, part.bbox_max.y);
+        g_ScenarioBoundsMax.z = std::max(g_ScenarioBoundsMax.z, part.bbox_max.z);
+
+        g_SceneParts.push_back(part);
+    }
+
+    // Computa adjacencia entre as cenas (AABB overlap com margem)
+    printf("\n=== Computando adjacencia entre cenas ===\n");
+    const float adjacency_margin = 1.5f;
+    for (size_t i = 0; i < g_SceneParts.size(); ++i)
+    {
+        for (size_t j = 0; j < g_SceneParts.size(); ++j)
+        {
+            if (i == j) continue;
+            const ScenePart &a = g_SceneParts[i];
+            const ScenePart &b = g_SceneParts[j];
+
+            const bool overlap =
+                (a.bbox_min.x - adjacency_margin <= b.bbox_max.x + adjacency_margin &&
+                 a.bbox_max.x + adjacency_margin >= b.bbox_min.x - adjacency_margin) &&
+                (a.bbox_min.y - adjacency_margin <= b.bbox_max.y + adjacency_margin &&
+                 a.bbox_max.y + adjacency_margin >= b.bbox_min.y - adjacency_margin) &&
+                (a.bbox_min.z - adjacency_margin <= b.bbox_max.z + adjacency_margin &&
+                 a.bbox_max.z + adjacency_margin >= b.bbox_min.z - adjacency_margin);
+
+            if (overlap)
+            {
+                g_SceneParts[i].adjacent_indices.push_back(j);
+            }
+        }
+        printf("  scene%02zu: %zu adjacentes\n", i, g_SceneParts[i].adjacent_indices.size());
+    }
+
+    // Configuracao inicial de cenas ativas (baseado no spawn point)
+    {
+        g_CurrentActiveSceneIndices.clear();
+        for (size_t i = 0; i < g_SceneParts.size(); ++i)
+        {
+            const ScenePart &part = g_SceneParts[i];
+            if (g_HardcodedTestSpawnPosition.x >= part.bbox_min.x &&
+                g_HardcodedTestSpawnPosition.x <= part.bbox_max.x &&
+                g_HardcodedTestSpawnPosition.y >= part.bbox_min.y &&
+                g_HardcodedTestSpawnPosition.y <= part.bbox_max.y &&
+                g_HardcodedTestSpawnPosition.z >= part.bbox_min.z &&
+                g_HardcodedTestSpawnPosition.z <= part.bbox_max.z)
+            {
+                g_CurrentActiveSceneIndices.push_back(i);
+                for (size_t adj : g_SceneParts[i].adjacent_indices)
+                    g_CurrentActiveSceneIndices.push_back(adj);
+                // Remove duplicatas
+                std::sort(g_CurrentActiveSceneIndices.begin(), g_CurrentActiveSceneIndices.end());
+                g_CurrentActiveSceneIndices.erase(
+                    std::unique(g_CurrentActiveSceneIndices.begin(), g_CurrentActiveSceneIndices.end()),
+                    g_CurrentActiveSceneIndices.end());
+                break;
+            }
+        }
+
+        // Se nao encontrou cena exata, usa scene00 + adjacentes
+        if (g_CurrentActiveSceneIndices.empty())
+        {
+            g_CurrentActiveSceneIndices.push_back(0);
+            for (size_t adj : g_SceneParts[0].adjacent_indices)
+                g_CurrentActiveSceneIndices.push_back(adj);
+            std::sort(g_CurrentActiveSceneIndices.begin(), g_CurrentActiveSceneIndices.end());
+            g_CurrentActiveSceneIndices.erase(
+                std::unique(g_CurrentActiveSceneIndices.begin(), g_CurrentActiveSceneIndices.end()),
+                g_CurrentActiveSceneIndices.end());
+        }
+
+        // Constroi g_ScenarioCollisionShapes inicial
+        g_ScenarioCollisionShapes.clear();
+        for (size_t idx : g_CurrentActiveSceneIndices)
+        {
+            for (auto &cs : g_SceneParts[idx].collision_shapes)
+                g_ScenarioCollisionShapes.push_back(cs);
+        }
+
+        printf("Cenas ativas iniciais: %zu (total collision shapes: %zu)\n",
+               g_CurrentActiveSceneIndices.size(), g_ScenarioCollisionShapes.size());
+    }
+
+    // Tambem populamos g_ScenarioObjectNames para compatibilidade com codigo legado
+    g_ScenarioObjectNames.clear();
+    for (const auto &part : g_SceneParts)
+        for (const auto &name : part.render_object_names)
+            g_ScenarioObjectNames.push_back(name);
+
+    const std::string player_model_path = ResolveScene00Path("../../Sword and Shield Pack/childlink_v2_clean.fbx", "Sword and Shield Pack/childlink_v2_clean.fbx");
+    const std::string fairy_model_path = ResolveScene00Path("../../assets/navi/Navi.obj", "assets/navi/Navi.obj");
 
     // Carregamos o modelo visual do personagem principal usando Assimp (FBX).
     if (!g_PlayerModelLoader.LoadModel(player_model_path)) {
@@ -1132,7 +1308,7 @@ int main()
     const glm::vec4 player_model_center = (player_model_bbox_min + player_model_bbox_max) * 0.5f;
     const glm::vec4 player_model_size = player_model_bbox_max - player_model_bbox_min;
     const float player_model_max_dimension = std::max(player_model_size.x, std::max(player_model_size.y, player_model_size.z));
-    const float player_model_scale = (player_model_max_dimension > 1e-6f) ? (1.7f / player_model_max_dimension) : 1.0f;
+    const float player_model_scale = (player_model_max_dimension > 1e-6f) ? (1.5f / player_model_max_dimension) : 1.0f;
 
     g_PlayerCubeHalfExtents = glm::vec4(
         player_model_size.x * player_model_scale * 0.5f,
@@ -1177,10 +1353,11 @@ int main()
     ComputeObjBounds(&fairy_model, fairy_model_bbox_min, fairy_model_bbox_max);
 
     std::vector<std::string> fairy_model_object_names;
-    fairy_model_object_names.reserve(fairy_model.shapes.size());
-    for (size_t i = 0; i < fairy_model.shapes.size(); ++i)
+    // Coleta nomes gerados após split de face groups
+    for (auto &[name, obj] : g_VirtualScene)
     {
-        fairy_model_object_names.push_back(fairy_model.shapes[i].name);
+        if (name.find("Navi_") == 0)
+            fairy_model_object_names.push_back(name);
     }
 
     const glm::vec4 fairy_model_center = (fairy_model_bbox_min + fairy_model_bbox_max) * 0.5f;
@@ -1197,21 +1374,16 @@ int main()
     ComputeObjBounds(&sphere_model, sphere_model_bbox_min, sphere_model_bbox_max);
 
     std::vector<std::string> sphere_model_object_names;
-    sphere_model_object_names.reserve(sphere_model.shapes.size());
-    for (size_t i = 0; i < sphere_model.shapes.size(); ++i)
+    // Coleta nomes gerados após split de face groups
+    for (auto &[name, obj] : g_VirtualScene)
     {
-        sphere_model_object_names.push_back(sphere_model.shapes[i].name);
+        if (name.find("the_sphere") == 0)
+            sphere_model_object_names.push_back(name);
     }
 
     const glm::vec4 sphere_model_center = (sphere_model_bbox_min + sphere_model_bbox_max) * 0.5f;
 
-    // Alinha collision.obj ao espaço do map.obj (centro + escala).
-    // NOTA: Esta lógica automática foi desabilitada pois estava causando desalinhamento
-    // (colisões invisíveis) quando o modelo de colisão tinha dimensões diferentes do mapa.
-    const glm::mat4 collision_alignment = Matrix_Identity();
-
-    // Construímos os dados usados pelo sistema de colisão.
-    BuildCollisionDataFromObjModel(&scenario_collision_model, GetScenarioModelMatrix() * collision_alignment);
+    // Dados de colisao ja foram construidos durante o loop de carregamento das cenas.
 
     // Spawn hardcoded para testes na scene00.
     g_PlayerCubePosition = g_HardcodedTestSpawnPosition;
@@ -1250,6 +1422,49 @@ int main()
             g_SlingshotState.charge_time_seconds += delta_time;
             g_SlingshotState.charge_time_seconds =
                 std::min(g_SlingshotState.charge_time_seconds, g_SlingshotState.max_charge_time_seconds);
+        }
+
+        // Detecta quais cenas do mapa estao ativas (player dentro + adjacentes)
+        {
+            size_t current_scene = g_SceneParts.size(); // invalido
+            for (size_t i = 0; i < g_SceneParts.size(); ++i)
+            {
+                const ScenePart &part = g_SceneParts[i];
+                if (g_PlayerCubePosition.x >= part.bbox_min.x &&
+                    g_PlayerCubePosition.x <= part.bbox_max.x &&
+                    g_PlayerCubePosition.y >= part.bbox_min.y &&
+                    g_PlayerCubePosition.y <= part.bbox_max.y &&
+                    g_PlayerCubePosition.z >= part.bbox_min.z &&
+                    g_PlayerCubePosition.z <= part.bbox_max.z)
+                {
+                    current_scene = i;
+                    break;
+                }
+            }
+
+            if (current_scene >= g_SceneParts.size())
+            {
+                // Player fora de todas as cenas — fallback para scene00
+                current_scene = 0;
+            }
+
+            std::vector<size_t> new_active;
+            new_active.push_back(current_scene);
+            for (size_t adj : g_SceneParts[current_scene].adjacent_indices)
+                new_active.push_back(adj);
+            std::sort(new_active.begin(), new_active.end());
+            new_active.erase(std::unique(new_active.begin(), new_active.end()), new_active.end());
+
+            if (new_active != g_CurrentActiveSceneIndices)
+            {
+                g_CurrentActiveSceneIndices = new_active;
+                g_ScenarioCollisionShapes.clear();
+                for (size_t idx : g_CurrentActiveSceneIndices)
+                {
+                    for (auto &cs : g_SceneParts[idx].collision_shapes)
+                        g_ScenarioCollisionShapes.push_back(cs);
+                }
+            }
         }
 
         // State machine antes do movimento — precisa de onGround do frame anterior
@@ -1407,9 +1622,12 @@ int main()
         glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE, glm::value_ptr(glm::transpose(glm::inverse(model))));
         glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
         glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
-        for (size_t i = 0; i < g_ScenarioObjectNames.size(); ++i)
+        for (size_t idx : g_CurrentActiveSceneIndices)
         {
-            DrawVirtualObject(g_ScenarioObjectNames[i].c_str());
+            for (auto &name : g_SceneParts[idx].render_object_names)
+            {
+                DrawVirtualObject(name.c_str());
+            }
         }
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
@@ -1703,6 +1921,16 @@ int main()
         // Imprimimos na informação sobre a matriz de projeção sendo utilizada.
         TextRendering_ShowProjection(window);
 
+        if (g_ShowPlayerCoords)
+        {
+            char buf[128];
+            float lineheight = TextRendering_LineHeight(window);
+            snprintf(buf, sizeof(buf), "Pos: %.2f %.2f %.2f  Yaw: %.1f",
+                     g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
+                     g_PlayerYaw * 180.0f / 3.141592f);
+            TextRendering_PrintString(window, buf, -1.0f, -1.0f + lineheight, 1.0f);
+        }
+
         // Imprimimos na tela informação sobre o número de quadros renderizados
         // por segundo (frames per second).
         TextRendering_ShowFramesPerSecond(window);
@@ -1811,26 +2039,17 @@ void DrawVirtualObject(const char *object_name)
 
     glUniform1i(texture_unit_location, 0);
 
-    // Setamos as variáveis "bbox_min" e "bbox_max" do fragment shader
-    // com os parâmetros da axis-aligned bounding box (AABB) do modelo.
     glm::vec4 bbox_min = g_VirtualScene[object_name].bbox_min;
     glm::vec4 bbox_max = g_VirtualScene[object_name].bbox_max;
     glUniform4f(g_bbox_min_uniform, bbox_min.x, bbox_min.y, bbox_min.z, 1.0f);
     glUniform4f(g_bbox_max_uniform, bbox_max.x, bbox_max.y, bbox_max.z, 1.0f);
 
-    // Pedimos para a GPU rasterizar os vértices dos eixos XYZ
-    // apontados pelo VAO como linhas. Veja a definição de
-    // g_VirtualScene[""] dentro da função BuildTrianglesAndAddToVirtualScene(), e veja
-    // a documentação da função glDrawElements() em
-    // http://docs.gl/gl3/glDrawElements.
     glDrawElements(
         g_VirtualScene[object_name].rendering_mode,
         g_VirtualScene[object_name].num_indices,
         GL_UNSIGNED_INT,
         (void *)(g_VirtualScene[object_name].first_index * sizeof(GLuint)));
 
-    // "Desligamos" o VAO, evitando assim que operações posteriores venham a
-    // alterar o mesmo. Isso evita bugs.
     glBindVertexArray(0);
 }
 
@@ -2041,7 +2260,7 @@ void ComputeNormals(ObjModel *model)
 }
 
 // Constrói triângulos para futura renderização a partir de um ObjModel.
-void BuildTrianglesAndAddToVirtualScene(ObjModel *model)
+void BuildTrianglesAndAddToVirtualScene(ObjModel *model, GLuint default_texture_id)
 {
     GLuint vertex_array_object_id;
     glGenVertexArrays(1, &vertex_array_object_id);
@@ -2054,100 +2273,121 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel *model)
 
     for (size_t shape = 0; shape < model->shapes.size(); ++shape)
     {
-        size_t first_index = indices.size();
-        size_t num_triangles = model->shapes[shape].mesh.num_face_vertices.size();
+        size_t num_faces = model->shapes[shape].mesh.num_face_vertices.size();
+        if (num_faces == 0) continue;
 
         const float minval = std::numeric_limits<float>::min();
         const float maxval = std::numeric_limits<float>::max();
 
-        glm::vec4 bbox_min = glm::vec4(maxval, maxval, maxval, 1.0f);
-        glm::vec4 bbox_max = glm::vec4(minval, minval, minval, 1.0f);
+        int current_material = -99;
+        size_t face_group_start = 0;
+        size_t group_index = 0;
 
-        for (size_t triangle = 0; triangle < num_triangles; ++triangle)
+        for (size_t face = 0; face <= num_faces; ++face)
         {
-            assert(model->shapes[shape].mesh.num_face_vertices[triangle] == 3);
+            int mat_id = (face < num_faces) ? model->shapes[shape].mesh.material_ids[face] : -99;
 
-            for (size_t vertex = 0; vertex < 3; ++vertex)
+            if (face == 0)
             {
-                tinyobj::index_t idx = model->shapes[shape].mesh.indices[3 * triangle + vertex];
+                current_material = mat_id;
+                face_group_start = 0;
+            }
 
-                indices.push_back(first_index + 3 * triangle + vertex);
+            if (mat_id != current_material || face == num_faces)
+            {
+                // Cria sub-objeto para as faces [face_group_start, face-1]
+                size_t group_first_index = indices.size();
+                glm::vec4 bbox_min = glm::vec4(maxval, maxval, maxval, 1.0f);
+                glm::vec4 bbox_max = glm::vec4(minval, minval, minval, 1.0f);
 
-                const float vx = model->attrib.vertices[3 * idx.vertex_index + 0];
-                const float vy = model->attrib.vertices[3 * idx.vertex_index + 1];
-                const float vz = model->attrib.vertices[3 * idx.vertex_index + 2];
-                // printf("tri %d vert %d = (%.2f, %.2f, %.2f)\n", (int)triangle, (int)vertex, vx, vy, vz);
-                model_coefficients.push_back(vx);   // X
-                model_coefficients.push_back(vy);   // Y
-                model_coefficients.push_back(vz);   // Z
-                model_coefficients.push_back(1.0f); // W
-
-                bbox_min.x = std::min(bbox_min.x, vx);
-                bbox_min.y = std::min(bbox_min.y, vy);
-                bbox_min.z = std::min(bbox_min.z, vz);
-                bbox_max.x = std::max(bbox_max.x, vx);
-                bbox_max.y = std::max(bbox_max.y, vy);
-                bbox_max.z = std::max(bbox_max.z, vz);
-
-                // Inspecionando o código da tinyobjloader, o aluno Bernardo
-                // Sulzbach (2017/1) apontou que a maneira correta de testar se
-                // existem normais e coordenadas de textura no ObjModel é
-                // comparando se o índice retornado é -1. Fazemos isso abaixo.
-
-                if (idx.normal_index != -1)
+                for (size_t f = face_group_start; f < face; ++f)
                 {
-                    const float nx = model->attrib.normals[3 * idx.normal_index + 0];
-                    const float ny = model->attrib.normals[3 * idx.normal_index + 1];
-                    const float nz = model->attrib.normals[3 * idx.normal_index + 2];
-                    normal_coefficients.push_back(nx);   // X
-                    normal_coefficients.push_back(ny);   // Y
-                    normal_coefficients.push_back(nz);   // Z
-                    normal_coefficients.push_back(0.0f); // W
+                    assert(model->shapes[shape].mesh.num_face_vertices[f] == 3);
+
+                    for (size_t vertex = 0; vertex < 3; ++vertex)
+                    {
+                        tinyobj::index_t idx = model->shapes[shape].mesh.indices[3 * f + vertex];
+
+                        indices.push_back(group_first_index + 3 * (f - face_group_start) + vertex);
+
+                        const float vx = model->attrib.vertices[3 * idx.vertex_index + 0];
+                        const float vy = model->attrib.vertices[3 * idx.vertex_index + 1];
+                        const float vz = model->attrib.vertices[3 * idx.vertex_index + 2];
+                        model_coefficients.push_back(vx);
+                        model_coefficients.push_back(vy);
+                        model_coefficients.push_back(vz);
+                        model_coefficients.push_back(1.0f);
+
+                        bbox_min.x = std::min(bbox_min.x, vx);
+                        bbox_min.y = std::min(bbox_min.y, vy);
+                        bbox_min.z = std::min(bbox_min.z, vz);
+                        bbox_max.x = std::max(bbox_max.x, vx);
+                        bbox_max.y = std::max(bbox_max.y, vy);
+                        bbox_max.z = std::max(bbox_max.z, vz);
+
+                        if (idx.normal_index != -1)
+                        {
+                            const float nx = model->attrib.normals[3 * idx.normal_index + 0];
+                            const float ny = model->attrib.normals[3 * idx.normal_index + 1];
+                            const float nz = model->attrib.normals[3 * idx.normal_index + 2];
+                            normal_coefficients.push_back(nx);
+                            normal_coefficients.push_back(ny);
+                            normal_coefficients.push_back(nz);
+                            normal_coefficients.push_back(0.0f);
+                        }
+
+                        if (idx.texcoord_index != -1)
+                        {
+                            const float u = model->attrib.texcoords[2 * idx.texcoord_index + 0];
+                            const float v = model->attrib.texcoords[2 * idx.texcoord_index + 1];
+                            texture_coefficients.push_back(u);
+                            texture_coefficients.push_back(v);
+                        }
+                    }
                 }
 
-                if (idx.texcoord_index != -1)
+                size_t group_last_index = indices.size() - 1;
+
+                SceneObject theobject;
+                char namebuf[512];
+                snprintf(namebuf, sizeof(namebuf), "%s_grp%zu", model->shapes[shape].name.c_str(), group_index);
+                theobject.name = namebuf;
+                theobject.first_index = group_first_index;
+                theobject.num_indices = group_last_index - group_first_index + 1;
+                theobject.rendering_mode = GL_TRIANGLES;
+                theobject.vertex_array_object_id = vertex_array_object_id;
+
+                if (current_material >= 0)
                 {
-                    const float u = model->attrib.texcoords[2 * idx.texcoord_index + 0];
-                    const float v = model->attrib.texcoords[2 * idx.texcoord_index + 1];
-                    texture_coefficients.push_back(u);
-                    texture_coefficients.push_back(v);
+                    theobject.texture_id = model->material_texture_ids[current_material];
+                    if (theobject.texture_id == 0)
+                        theobject.texture_id = default_texture_id;
+                    theobject.sampler_id = 0;
+                    for (auto const &[name, id] : g_TextureCache)
+                    {
+                        if (id == theobject.texture_id)
+                        {
+                            theobject.sampler_id = g_SamplerCache[name];
+                            break;
+                        }
+                    }
                 }
+                else
+                {
+                    theobject.texture_id = default_texture_id;
+                    theobject.sampler_id = 0;
+                }
+
+                theobject.bbox_min = bbox_min;
+                theobject.bbox_max = bbox_max;
+
+                g_VirtualScene[theobject.name] = theobject;
+
+                current_material = mat_id;
+                face_group_start = face;
+                group_index++;
             }
         }
-
-        size_t last_index = indices.size() - 1;
-
-        SceneObject theobject;
-        theobject.name = model->shapes[shape].name;
-        theobject.first_index = first_index;                  // Primeiro índice
-        theobject.num_indices = last_index - first_index + 1; // Número de indices
-        theobject.rendering_mode = GL_TRIANGLES;              // Índices correspondem ao tipo de rasterização GL_TRIANGLES.
-        theobject.vertex_array_object_id = vertex_array_object_id;
-
-        int material_id = model->shapes[shape].mesh.material_ids[0];
-        if (material_id >= 0)
-        {
-            theobject.texture_id = model->material_texture_ids[material_id];
-            // Encontra o sampler correspondente à textura no cache
-            for (auto const &[name, id] : g_TextureCache)
-            {
-                if (id == theobject.texture_id)
-                {
-                    theobject.sampler_id = g_SamplerCache[name];
-                    break;
-                }
-            }
-        }
-        else
-        {
-            theobject.texture_id = 0; // Sem textura
-            theobject.sampler_id = 0;
-        }
-
-        theobject.bbox_min = bbox_min;
-        theobject.bbox_max = bbox_max;
-
-        g_VirtualScene[model->shapes[shape].name] = theobject;
     }
 
     GLuint VBO_model_coefficients_id;
@@ -2568,6 +2808,84 @@ void BuildCollisionDataFromObjModel(ObjModel *model, glm::mat4 model_matrix)
     }
 }
 
+void BuildCollisionDataIntoVector(ObjModel *model, glm::mat4 model_matrix,
+    std::vector<CollisionShape> &out_shapes,
+    glm::vec4 &out_bbox_min, glm::vec4 &out_bbox_max)
+{
+    out_bbox_min = glm::vec4(+std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), 1.0f);
+    out_bbox_max = glm::vec4(-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), 1.0f);
+
+    for (size_t shape = 0; shape < model->shapes.size(); ++shape)
+    {
+        CollisionShape shape_collision;
+        shape_collision.bbox_min = glm::vec4(+std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), 1.0f);
+        shape_collision.bbox_max = glm::vec4(-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), 1.0f);
+
+        const size_t num_triangles = model->shapes[shape].mesh.num_face_vertices.size();
+        shape_collision.triangles.reserve(num_triangles);
+
+        if (model->shapes[shape].name.find("DOOR") != std::string::npos)
+        {
+            shape_collision.type = CollisionShapeType::DOOR;
+        }
+        else if (model->shapes[shape].name.find("VINES") != std::string::npos)
+        {
+            shape_collision.type = CollisionShapeType::VINES;
+        }
+        else if (model->shapes[shape].name.find("LADDER") != std::string::npos)
+        {
+            shape_collision.type = CollisionShapeType::LADDER;
+        }
+        else
+        {
+            shape_collision.type = CollisionShapeType::SOLID;
+        }
+
+        for (size_t triangle = 0; triangle < num_triangles; ++triangle)
+        {
+            assert(model->shapes[shape].mesh.num_face_vertices[triangle] == 3);
+
+            Triangle world_triangle;
+            for (size_t vertex = 0; vertex < 3; ++vertex)
+            {
+                const tinyobj::index_t idx = model->shapes[shape].mesh.indices[3 * triangle + vertex];
+                const glm::vec4 p_model(
+                    model->attrib.vertices[3 * idx.vertex_index + 0],
+                    model->attrib.vertices[3 * idx.vertex_index + 1],
+                    model->attrib.vertices[3 * idx.vertex_index + 2],
+                    1.0f);
+                const glm::vec4 p_world = model_matrix * p_model;
+                const glm::vec4 p = glm::vec4(p_world.x, p_world.y, p_world.z, 1.0f);
+
+                if (vertex == 0)
+                    world_triangle.v1 = p;
+                if (vertex == 1)
+                    world_triangle.v2 = p;
+                if (vertex == 2)
+                    world_triangle.v3 = p;
+
+                shape_collision.bbox_min.x = std::min(shape_collision.bbox_min.x, p.x);
+                shape_collision.bbox_min.y = std::min(shape_collision.bbox_min.y, p.y);
+                shape_collision.bbox_min.z = std::min(shape_collision.bbox_min.z, p.z);
+                shape_collision.bbox_max.x = std::max(shape_collision.bbox_max.x, p.x);
+                shape_collision.bbox_max.y = std::max(shape_collision.bbox_max.y, p.y);
+                shape_collision.bbox_max.z = std::max(shape_collision.bbox_max.z, p.z);
+            }
+
+            shape_collision.triangles.push_back(world_triangle);
+        }
+
+        out_bbox_min.x = std::min(out_bbox_min.x, shape_collision.bbox_min.x);
+        out_bbox_min.y = std::min(out_bbox_min.y, shape_collision.bbox_min.y);
+        out_bbox_min.z = std::min(out_bbox_min.z, shape_collision.bbox_min.z);
+        out_bbox_max.x = std::max(out_bbox_max.x, shape_collision.bbox_max.x);
+        out_bbox_max.y = std::max(out_bbox_max.y, shape_collision.bbox_max.y);
+        out_bbox_max.z = std::max(out_bbox_max.z, shape_collision.bbox_max.z);
+
+        out_shapes.push_back(shape_collision);
+    }
+}
+
 glm::vec4 ComputeCameraPositionWithCollision(const glm::vec4 &lookat_position, const glm::vec4 &desired_camera_position)
 {
     glm::vec4 direction = desired_camera_position - lookat_position;
@@ -2968,11 +3286,14 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
         fflush(stdout);
     }
 
-    // F1 toggles debug hitbox visualization
+    // F1 toggles debug: coords + hitboxes
     if (key == GLFW_KEY_F1 && action == GLFW_PRESS)
     {
+        g_ShowPlayerCoords = !g_ShowPlayerCoords;
         g_ShowDebugHitboxes = !g_ShowDebugHitboxes;
-        fprintf(stdout, "Debug hitboxes: %s\n", g_ShowDebugHitboxes ? "ON" : "OFF");
+        fprintf(stdout, "Debug: coords=%s hitboxes=%s\n",
+                g_ShowPlayerCoords ? "ON" : "OFF",
+                g_ShowDebugHitboxes ? "ON" : "OFF");
         fflush(stdout);
     }
 

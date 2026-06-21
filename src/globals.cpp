@@ -23,5 +23,6 @@ bool g_CollidedWithAVine = false;
 bool g_CollidedWithALadder = false;
 
 bool g_ShowDebugHitboxes = false;
+bool g_ShowPlayerCoords = false;
 
 PlayerStateMachine g_PlayerStateMachine;

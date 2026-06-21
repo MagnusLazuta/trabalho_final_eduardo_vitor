@@ -29,3 +29,4 @@ extern bool g_CollidedWithALadder;
 
 // Debug drawing
 extern bool g_ShowDebugHitboxes;
+extern bool g_ShowPlayerCoords;
