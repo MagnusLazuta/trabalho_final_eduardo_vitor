@@ -284,9 +284,14 @@ static GLuint g_DebugWireframeVAO = 0;
 static GLuint g_DebugWireframeVBO = 0;
 static GLuint g_DebugWireframeEBO = 0;
 static int g_DebugWireframeIndexCount = 0;
+static GLuint g_DebugArrowVAO = 0;
+static GLuint g_DebugArrowVBO = 0;
+static int g_DebugArrowVertexCount = 0;
 
 void BuildDebugWireframeCube();
 void DrawDebugAABB(const glm::vec4 &center, const glm::vec4 &half_extents, const glm::vec4 &color);
+void BuildDebugArrowVAO();
+void DrawDebugArrow(const glm::vec4 &origin, const glm::vec4 &direction, const glm::vec4 &color);
 struct SlingshotState
 {
     bool is_charging;
@@ -427,6 +432,85 @@ void DrawDebugOBB(const CollisionOBB &obb, const glm::vec4 &color)
     glLineWidth(2.0f);
     glBindVertexArray(g_DebugWireframeVAO);
     glDrawElements(GL_LINES, g_DebugWireframeIndexCount, GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+    glLineWidth(1.0f);
+    glEnable(GL_CULL_FACE);
+}
+
+void BuildDebugArrowVAO()
+{
+    const float vertices[] = {
+        0.0f, 0.0f, 0.0f,
+        1.0f, 0.0f, 0.0f,
+        1.0f, 0.0f, 0.0f,
+        0.85f, 0.05f, 0.05f,
+        1.0f, 0.0f, 0.0f,
+        0.85f, -0.05f, 0.05f,
+        1.0f, 0.0f, 0.0f,
+        0.85f, -0.05f, -0.05f,
+        1.0f, 0.0f, 0.0f,
+        0.85f, 0.05f, -0.05f,
+    };
+    g_DebugArrowVertexCount = 10;
+
+    glGenVertexArrays(1, &g_DebugArrowVAO);
+    glBindVertexArray(g_DebugArrowVAO);
+    glGenBuffers(1, &g_DebugArrowVBO);
+    glBindBuffer(GL_ARRAY_BUFFER, g_DebugArrowVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+void DrawDebugArrow(const glm::vec4 &origin, const glm::vec4 &direction, const glm::vec4 &color)
+{
+    if (g_DebugArrowVAO == 0)
+        return;
+
+    float len = norm(direction);
+    if (len < 1e-6f)
+        return;
+
+    glm::vec4 dir_n = direction / len;
+
+    glm::vec4 x_axis(1.0f, 0.0f, 0.0f, 0.0f);
+    float dot = dotproduct(x_axis, dir_n);
+    dot = std::max(-1.0f, std::min(1.0f, dot));
+
+    glm::mat4 model;
+    if (std::abs(dot - 1.0f) < 1e-6f)
+    {
+        model = Matrix_Translate(origin.x, origin.y, origin.z) *
+                Matrix_Scale(len, 1.0f, 1.0f);
+    }
+    else if (std::abs(dot + 1.0f) < 1e-6f)
+    {
+        model = Matrix_Translate(origin.x, origin.y, origin.z) *
+                Matrix_Scale(-len, 1.0f, 1.0f);
+    }
+    else
+    {
+        float angle = std::acos(dot);
+        glm::vec4 axis = crossproduct(x_axis, dir_n);
+        axis = axis / norm(axis);
+        model = Matrix_Translate(origin.x, origin.y, origin.z) *
+                Matrix_Rotate(angle, axis) *
+                Matrix_Scale(len, 1.0f, 1.0f);
+    }
+
+    glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+    glUniform1i(g_object_id_uniform, OBJECT_ID_DEBUG_CUBE);
+
+    GLint color_loc = glGetUniformLocation(g_GpuProgramID, "debug_color");
+    if (color_loc >= 0)
+        glUniform4f(color_loc, color.x, color.y, color.z, color.w);
+
+    glDisable(GL_CULL_FACE);
+    glLineWidth(2.0f);
+    glBindVertexArray(g_DebugArrowVAO);
+    glDrawArrays(GL_LINES, 0, g_DebugArrowVertexCount);
     glBindVertexArray(0);
     glLineWidth(1.0f);
     glEnable(GL_CULL_FACE);
@@ -752,8 +836,9 @@ int main()
     // para renderização. Veja slides 180-200 do documento Aula_03_Rendering_Pipeline_Grafico.pdf.
     LoadShadersFromFiles();
 
-    // Build debug wireframe cube for hitbox visualization
+    // Build debug wireframe cube and arrow for hitbox and vector visualization
     BuildDebugWireframeCube();
+    BuildDebugArrowVAO();
 
     // Carregamos duas imagens para serem utilizadas como textura
     LoadTextureImage("../../data/red_brick_diff_1k.jpg");        // TextureImage0
@@ -763,7 +848,7 @@ int main()
     const std::string scene_map_path = ResolveScene00Path(g_SceneMapPath, "assets/scenes/scene00/map.obj");
     const std::string scene_collision_path = ResolveScene00Path(g_SceneCollisionPath, "assets/scenes/scene00/collision.obj");
     const std::string player_model_path = ResolveScene00Path("../../assets/char/child_link_clean.obj", "assets/char/child_link_clean.obj");
-    const std::string fairy_model_path = ResolveScene00Path("../../data/sphere.obj", "data/sphere.obj");
+    const std::string fairy_model_path = ResolveScene00Path("../../assets/navi/Navi.obj", "assets/navi/Navi.obj");
 
     // Carregamos o mapa da cena para renderização.
     ObjModel scenario_map_model(scene_map_path.c_str());
@@ -832,6 +917,23 @@ int main()
     const glm::vec4 fairy_model_size = fairy_model_bbox_max - fairy_model_bbox_min;
     const float fairy_model_max_dimension = std::max(fairy_model_size.x, std::max(fairy_model_size.y, fairy_model_size.z));
     const float fairy_model_scale = (fairy_model_max_dimension > 1e-6f) ? (0.22f / fairy_model_max_dimension) : 1.0f;
+
+    // Carregamos o modelo da esfera para o projétil (estilingue).
+    const std::string sphere_model_path = ResolveScene00Path("../../data/sphere.obj", "data/sphere.obj");
+    ObjModel sphere_model(sphere_model_path.c_str());
+    ComputeNormals(&sphere_model);
+    BuildTrianglesAndAddToVirtualScene(&sphere_model);
+    glm::vec4 sphere_model_bbox_min, sphere_model_bbox_max;
+    ComputeObjBounds(&sphere_model, sphere_model_bbox_min, sphere_model_bbox_max);
+
+    std::vector<std::string> sphere_model_object_names;
+    sphere_model_object_names.reserve(sphere_model.shapes.size());
+    for (size_t i = 0; i < sphere_model.shapes.size(); ++i)
+    {
+        sphere_model_object_names.push_back(sphere_model.shapes[i].name);
+    }
+
+    const glm::vec4 sphere_model_center = (sphere_model_bbox_min + sphere_model_bbox_max) * 0.5f;
 
     // Alinha collision.obj ao espaço do map.obj (centro + escala).
     // NOTA: Esta lógica automática foi desabilitada pois estava causando desalinhamento
@@ -1039,15 +1141,22 @@ int main()
 
         const float fairy_orbit_progress = std::fmod(static_cast<float>(current_frame_time) / g_FairyMotionParams.orbit_period_seconds, 1.0f);
         const glm::vec4 fairy_head_center = g_PlayerCubePosition + glm::vec4(0.0f, g_FairyMotionParams.head_height_offset, 0.0f, 0.0f);
-        const glm::vec4 fairy_world_position = fairy_head_center + ComputeFairyOffset(fairy_orbit_progress, g_FairyMotionParams);
+        const glm::vec4 fairy_offset = ComputeFairyOffset(fairy_orbit_progress, g_FairyMotionParams);
+        const glm::vec4 fairy_world_position = fairy_head_center + fairy_offset;
+
+        const float pi = 3.141592f;
+        const float vx = -fairy_offset.z;
+        const float vz = fairy_offset.x;
+        const float yaw = std::atan2(vx, vz) + pi / 2.0f;
 
         model =
             Matrix_Translate(fairy_world_position.x, fairy_world_position.y, fairy_world_position.z) *
+            Matrix_Rotate_Y(yaw) *
             Matrix_Scale(fairy_model_scale, fairy_model_scale, fairy_model_scale) *
             Matrix_Translate(-fairy_model_center.x, -fairy_model_center.y, -fairy_model_center.z);
 
         glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, OBJECT_ID_SPHERE);
+        glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
         glUniform1i(g_cube_colliding_uniform, 0);
         for (size_t i = 0; i < fairy_model_object_names.size(); ++i)
         {
@@ -1059,14 +1168,14 @@ int main()
             model =
                 Matrix_Translate(g_SlingshotProjectile.position.x, g_SlingshotProjectile.position.y, g_SlingshotProjectile.position.z) *
                 Matrix_Scale(g_SlingshotProjectile.radius, g_SlingshotProjectile.radius, g_SlingshotProjectile.radius) *
-                Matrix_Translate(-fairy_model_center.x, -fairy_model_center.y, -fairy_model_center.z);
+                Matrix_Translate(-sphere_model_center.x, -sphere_model_center.y, -sphere_model_center.z);
 
             glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
             glUniform1i(g_object_id_uniform, OBJECT_ID_PROJECTILE);
             glUniform1i(g_cube_colliding_uniform, 0);
-            for (size_t i = 0; i < fairy_model_object_names.size(); ++i)
+            for (size_t i = 0; i < sphere_model_object_names.size(); ++i)
             {
-                DrawVirtualObject(fairy_model_object_names[i].c_str());
+                DrawVirtualObject(sphere_model_object_names[i].c_str());
             }
         }
         glEnable(GL_CULL_FACE);
@@ -1110,6 +1219,32 @@ int main()
                     glm::vec4 vine_color(1.0f, 0.0f, 1.0f, 1.0f);
                     DrawDebugAABB(vine_center, vine_half, vine_color);
                 }
+            }
+
+            // Navi vectors debug display (3D arrows)
+            {
+                const float debug_navi_progress = std::fmod(static_cast<float>(current_frame_time) / g_FairyMotionParams.orbit_period_seconds, 1.0f);
+                const glm::vec4 debug_navi_offset = ComputeFairyOffset(debug_navi_progress, g_FairyMotionParams);
+                const glm::vec4 debug_navi_pos = g_PlayerCubePosition + glm::vec4(0.0f, g_FairyMotionParams.head_height_offset, 0.0f, 0.0f) + debug_navi_offset;
+
+                const float debug_navi_w = debug_navi_progress - std::floor(debug_navi_progress);
+                const float debug_navi_vx = -debug_navi_offset.z;
+                const float debug_navi_vz = debug_navi_offset.x;
+                const float debug_navi_vy = g_FairyMotionParams.vertical_oscillation_amplitude *
+                                            2.0f * 3.141592f * g_FairyMotionParams.vertical_oscillations_per_circle *
+                                            std::cos(2.0f * 3.141592f * g_FairyMotionParams.vertical_oscillations_per_circle * debug_navi_w);
+                const float debug_navi_yaw = std::atan2(debug_navi_vx, debug_navi_vz) + 3.141592f / 2.0f;
+
+                const float debug_arrow_len = 0.4f;
+                glm::vec4 vel_dir(debug_navi_vx, debug_navi_vy, debug_navi_vz, 0.0f);
+                float vel_len = norm(vel_dir);
+                if (vel_len > 1e-6f)
+                    vel_dir = vel_dir / vel_len;
+                glm::vec4 forward_dir(-std::sin(debug_navi_yaw), 0.0f, -std::cos(debug_navi_yaw), 0.0f);
+
+                DrawDebugArrow(debug_navi_pos, vel_dir * debug_arrow_len, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+                DrawDebugArrow(debug_navi_pos, forward_dir * debug_arrow_len, glm::vec4(0.0f, 0.5f, 1.0f, 1.0f));
+                DrawDebugArrow(debug_navi_pos, glm::vec4(0.0f, debug_arrow_len, 0.0f, 0.0f), glm::vec4(0.0f, 1.0f, 0.0f, 1.0f));
             }
 
             glEnable(GL_DEPTH_TEST);
