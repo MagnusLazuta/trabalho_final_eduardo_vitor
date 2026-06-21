@@ -1,0 +1,3 @@
+When i went through the textures there were many "ball of light" textures, i decided to include them all, you may notice
+that there are two of each texture, that is because one is the texture and the other is the mask, ah nintendo you can't
+help but admire the lengths they whent to to not save space...

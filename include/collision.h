@@ -25,6 +25,13 @@ struct CollisionAABB
     glm::vec4 max;
 };
 
+struct CollisionOBB
+{
+    glm::vec4 center;
+    glm::vec4 half_extents;
+    float yaw;
+};
+
 enum class CollisionShapeType
 {
     SOLID,
@@ -56,11 +63,17 @@ CollisionShapeType CollidesWithScenarioAabb(const glm::vec4 &center, const glm::
 
 CollisionShapeType CollidesWithScenario(const glm::vec4 &cube_center, const std::vector<CollisionShape> &g_ScenarioCollisionShapes, const glm::vec4 &g_PlayerCubeHalfExtents);
 
+CollisionShapeType CollidesWithScenarioObb(const CollisionOBB &obb, const std::vector<CollisionShape> &g_ScenarioCollisionShapes);
+
 bool IsCollidingWithType(const glm::vec4 &center, const glm::vec4 &half_extents, const std::vector<CollisionShape> &g_ScenarioCollisionShapes, CollisionShapeType type);
+
+bool IsCollidingWithTypeObb(const CollisionOBB &obb, const std::vector<CollisionShape> &g_ScenarioCollisionShapes, CollisionShapeType type);
 
 bool GetVinesNormal(const glm::vec4 &center, const glm::vec4 &half_extents, const std::vector<CollisionShape> &g_ScenarioCollisionShapes, glm::vec4 &out_normal);
 
 bool TriangleIntersectsAabb(const Triangle &triangle, const glm::vec4 &box_center, const glm::vec4 &box_half_extents);
+
+bool TriangleIntersectsObb(const Triangle &triangle, const CollisionOBB &obb);
 
 static bool OverlapOnAxis(
     const glm::vec4 &v0,

@@ -18,3 +18,5 @@ bool g_IsClimbingAVine = false;
 bool g_IsClimbingALadder = false;
 bool g_CollidedWithAVine = false;
 bool g_CollidedWithALadder = false;
+
+bool g_ShowDebugHitboxes = false;
