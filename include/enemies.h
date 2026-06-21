@@ -24,6 +24,7 @@ enum class EnemyType
 enum class EnemyState
 {
     Idle,
+    Patrol,
     Hidden,
     Aiming,
     Shooting,
@@ -31,6 +32,7 @@ enum class EnemyState
     Turning,
     Vulnerable,
     Attacking,
+    Recovering,
     Chasing,
     Jumping,
     Dead,
@@ -109,7 +111,9 @@ struct EnemyRenderResources
 {
     const RenderModelInfo *deku_baba_render_info;
     const RenderModelInfo *deku_scrub_render_info;
+    const RenderModelInfo *deku_scrub_plant_render_info;
     const RenderModelInfo *deku_scrub_projectile_render_info;
+    const RenderModelInfo *spider_render_info;
     const RenderModelInfo *queen_gohma_render_info;
     const RenderModelInfo *sphere_render_info;
 };
@@ -137,5 +141,6 @@ void DrawEnemyProjectiles(const EnemyDrawContext &context);
 
 int QueryEnemyHitByPlayerProjectile(const glm::vec4 &projectile_position, float projectile_radius);
 void ApplyPlayerProjectileDamageToEnemy(int enemy_index, int damage);
+bool QueryBlockingEnemyCollision(const glm::vec4 &center, const glm::vec4 &half_extents);
 
 #endif // _ENEMIES_H

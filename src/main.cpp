@@ -310,6 +310,8 @@ struct SlingshotState
     float charge_time_seconds;
     float queued_charge_ratio;
     float max_charge_time_seconds;
+    float shot_cooldown_seconds;
+    float shot_cooldown_timer;
 };
 
 struct ProjectileState
@@ -339,7 +341,7 @@ struct ProjectileCollisionResult
     int object_index;
 };
 
-SlingshotState g_SlingshotState = {false, false, 0.0f, 0.0f, 1.0f};
+SlingshotState g_SlingshotState = {false, false, 0.0f, 0.0f, 1.0f, 0.28f, 0.0f};
 ProjectileState g_SlingshotProjectile = {
     false,
     glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),
@@ -351,7 +353,9 @@ ProjectileState g_SlingshotProjectile = {
 
 RenderModelInfo g_DekuBabaRenderInfo = {false, {}, glm::vec4(0.0f), 1.0f};
 RenderModelInfo g_DekuScrubRenderInfo = {false, {}, glm::vec4(0.0f), 1.0f};
+RenderModelInfo g_DekuScrubPlantRenderInfo = {false, {}, glm::vec4(0.0f), 1.0f};
 RenderModelInfo g_DekuScrubProjectileRenderInfo = {false, {}, glm::vec4(0.0f), 1.0f};
+RenderModelInfo g_SpiderRenderInfo = {false, {}, glm::vec4(0.0f), 1.0f};
 RenderModelInfo g_QueenGohmaRenderInfo = {false, {}, glm::vec4(0.0f), 1.0f};
 RenderModelInfo g_SphereRenderInfo = {false, {}, glm::vec4(0.0f), 1.0f};
 
@@ -692,6 +696,9 @@ static glm::vec4 ComputeProjectileSpawnPosition(const glm::vec4 &camera_position
 
 static void BeginSlingshotCharge()
 {
+    if (g_SlingshotState.shot_cooldown_timer > 0.0f)
+        return;
+
     g_SlingshotState.is_charging = true;
     g_SlingshotState.fire_requested = false;
     g_SlingshotState.charge_time_seconds = 0.0f;
@@ -700,6 +707,14 @@ static void BeginSlingshotCharge()
 
 static void QueueSlingshotShot()
 {
+    if (g_SlingshotState.shot_cooldown_timer > 0.0f)
+    {
+        g_SlingshotState.is_charging = false;
+        g_SlingshotState.charge_time_seconds = 0.0f;
+        g_SlingshotState.queued_charge_ratio = 0.0f;
+        return;
+    }
+
     g_SlingshotState.is_charging = false;
     g_SlingshotState.fire_requested = true;
     g_SlingshotState.queued_charge_ratio = GetSlingshotPullAmount();
@@ -740,6 +755,7 @@ static void FireSlingshotProjectile(const glm::vec4 &camera_position, const glm:
 
     g_SlingshotState.fire_requested = false;
     g_SlingshotState.queued_charge_ratio = 0.0f;
+    g_SlingshotState.shot_cooldown_timer = g_SlingshotState.shot_cooldown_seconds;
 }
 
 static void UpdateSlingshotProjectile(float delta_time)
@@ -1524,7 +1540,9 @@ int main()
     const std::string fairy_model_path = ResolveScene00Path("../../assets/navi/Navi.obj", "assets/navi/Navi.obj");
     const std::string deku_baba_model_path = ResolveScene00Path("../../assets/enemies/Deku Baba/Deku Baba/Dekubaba.obj", "assets/enemies/Deku Baba/Deku Baba/Dekubaba.obj");
     const std::string deku_scrub_model_path = ResolveScene00Path("../../assets/enemies/Deku Scrub/Deku Scrub (Forest Stage).obj", "assets/enemies/Deku Scrub/Deku Scrub (Forest Stage).obj");
+    const std::string deku_scrub_plant_model_path = ResolveScene00Path("../../assets/enemies/Deku Scrub/choronuts_plant/choronuts_plant.obj", "assets/enemies/Deku Scrub/choronuts_plant/choronuts_plant.obj");
     const std::string deku_scrub_projectile_model_path = ResolveScene00Path("../../assets/enemies/Deku Scrub/dnk_ball_model/dnk_ball_model.obj", "assets/enemies/Deku Scrub/dnk_ball_model/dnk_ball_model.obj");
+    const std::string spider_model_path = ResolveScene00Path("../../assets/enemies/Spider/Only_Spider_with_Animations_Export.obj", "assets/enemies/Spider/Only_Spider_with_Animations_Export.obj");
     const std::string queen_gohma_model_path = ResolveScene00Path("../../assets/enemies/Boss Queen Gohma/Queen Gohma/Queen Gohma.obj", "assets/enemies/Boss Queen Gohma/Queen Gohma/Queen Gohma.obj");
 
 
@@ -1624,10 +1642,20 @@ int main()
     BuildTrianglesAndAddToVirtualScene(&deku_scrub_model);
     g_DekuScrubRenderInfo = BuildRenderModelInfo(deku_scrub_model, 1.5f);
 
+    ObjModel deku_scrub_plant_model(deku_scrub_plant_model_path.c_str());
+    ComputeNormals(&deku_scrub_plant_model);
+    BuildTrianglesAndAddToVirtualScene(&deku_scrub_plant_model);
+    g_DekuScrubPlantRenderInfo = BuildRenderModelInfo(deku_scrub_plant_model, 1.5f);
+
     ObjModel deku_scrub_projectile_model(deku_scrub_projectile_model_path.c_str());
     ComputeNormals(&deku_scrub_projectile_model);
     BuildTrianglesAndAddToVirtualScene(&deku_scrub_projectile_model);
     g_DekuScrubProjectileRenderInfo = BuildRenderModelInfo(deku_scrub_projectile_model, 0.35f);
+
+    ObjModel spider_model(spider_model_path.c_str());
+    ComputeNormals(&spider_model);
+    BuildTrianglesAndAddToVirtualScene(&spider_model);
+    g_SpiderRenderInfo = BuildRenderModelInfo(spider_model, 1.0f);
 
     ObjModel queen_gohma_model(queen_gohma_model_path.c_str());
     ComputeNormals(&queen_gohma_model);
@@ -1681,6 +1709,12 @@ int main()
             g_SlingshotState.charge_time_seconds += delta_time;
             g_SlingshotState.charge_time_seconds =
                 std::min(g_SlingshotState.charge_time_seconds, g_SlingshotState.max_charge_time_seconds);
+        }
+
+        if (g_SlingshotState.shot_cooldown_timer > 0.0f)
+        {
+            g_SlingshotState.shot_cooldown_timer =
+                std::max(0.0f, g_SlingshotState.shot_cooldown_timer - delta_time);
         }
 
         float move_input = UpdatePlayerMovement(window, delta_time);
@@ -1861,7 +1895,9 @@ int main()
         enemy_draw_context.object_id_enemy = OBJECT_ID_ENEMY;
         enemy_draw_context.render_resources.deku_baba_render_info = &g_DekuBabaRenderInfo;
         enemy_draw_context.render_resources.deku_scrub_render_info = &g_DekuScrubRenderInfo;
+        enemy_draw_context.render_resources.deku_scrub_plant_render_info = &g_DekuScrubPlantRenderInfo;
         enemy_draw_context.render_resources.deku_scrub_projectile_render_info = &g_DekuScrubProjectileRenderInfo;
+        enemy_draw_context.render_resources.spider_render_info = &g_SpiderRenderInfo;
         enemy_draw_context.render_resources.queen_gohma_render_info = &g_QueenGohmaRenderInfo;
         enemy_draw_context.render_resources.sphere_render_info = &g_SphereRenderInfo;
         enemy_draw_context.draw_virtual_object = DrawVirtualObject;
@@ -3058,6 +3094,7 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
             g_SlingshotState.fire_requested = false;
             g_SlingshotState.charge_time_seconds = 0.0f;
             g_SlingshotState.queued_charge_ratio = 0.0f;
+            g_SlingshotState.shot_cooldown_timer = 0.0f;
         }
     }
 

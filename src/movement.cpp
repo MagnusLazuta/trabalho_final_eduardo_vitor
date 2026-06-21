@@ -5,8 +5,10 @@
 #include <cmath>
 
 #include "collision.h"
-#include "types.h"
 #include "globals.h"
+#include "types.h"
+
+bool QueryBlockingEnemyCollision(const glm::vec4 &center, const glm::vec4 &half_extents);
 
 const float gravity = -9.8f;   // aceleração
 const float jump_speed = 5.0f; // pulo
@@ -89,7 +91,9 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     test_pos_x.y += horizontal_test_margin / 2.0f;
     CollisionOBB obb_x = {test_pos_x, h_half_extents, g_PlayerYaw};
     CollisionShapeType col_x = CollidesWithScenarioObb(obb_x, g_ScenarioCollisionShapes);
-    if (col_x != CollisionShapeType::SOLID && col_x != CollisionShapeType::DOOR)
+    if (col_x != CollisionShapeType::SOLID &&
+        col_x != CollisionShapeType::DOOR &&
+        !QueryBlockingEnemyCollision(test_pos_x, h_half_extents))
         updated_position.x = test_pos_x.x;
 
     // Movimento Z
@@ -98,7 +102,9 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     test_pos_z.y += horizontal_test_margin / 2.0f;
     CollisionOBB obb_z = {test_pos_z, h_half_extents, g_PlayerYaw};
     CollisionShapeType col_z = CollidesWithScenarioObb(obb_z, g_ScenarioCollisionShapes);
-    if (col_z != CollisionShapeType::SOLID && col_z != CollisionShapeType::DOOR)
+    if (col_z != CollisionShapeType::SOLID &&
+        col_z != CollisionShapeType::DOOR &&
+        !QueryBlockingEnemyCollision(test_pos_z, h_half_extents))
         updated_position.z = test_pos_z.z;
 
     // Movimento Y

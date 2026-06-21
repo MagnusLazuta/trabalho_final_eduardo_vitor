@@ -20,9 +20,28 @@ static const float DEKU_BABA_BITE_WINDUP = 0.35f;
 static const float DEKU_BABA_BITE_ACTIVE_TIME = 0.22f;
 static const float DEKU_BABA_BITE_RECOVERY = 0.55f;
 static const float DEKU_SCRUB_HIDDEN_HEIGHT = -0.45f;
+static const float DEKU_SCRUB_PLANT_Y_OFFSET = -0.55f;
 static const float DEKU_SCRUB_STUN_DURATION = 3.0f;
+static const float SKULLWALLTULA_SCALE = 1.2f;
+static const float SKULLWALLTULA_VERTICAL_RANGE = 1.0f;
+static const float SKULLWALLTULA_SPEED = 0.3f;
+static const float SKULLWALLTULA_CONTACT_RADIUS_BONUS = 0.04f;
+static const float SKULLWALLTULA_ALERT_RADIUS = 1.9f;
+static const float SKULLWALLTULA_ATTACK_TILT = 0.22f;
+static const float BIG_SKULLTULA_SCALE = 2.8f;
+static const float BIG_SKULLTULA_TURN_SPEED = 2.4f;
+static const float BIG_SKULLTULA_ATTACK_RADIUS = 2.0f;
+static const float BIG_SKULLTULA_ATTACK_SPEED = 1.9f;
 static const float BIG_SKULLTULA_ATTACK_DURATION = 0.85f;
-static const float BIG_SKULLTULA_VULNERABLE_DURATION = 1.2f;
+static const float BIG_SKULLTULA_COOLDOWN = 2.5f;
+static const float BIG_SKULLTULA_RECOVERY_DURATION = 0.55f;
+static const float BIG_SKULLTULA_VULNERABLE_DURATION = 1.6f;
+static const float BIG_SKULLTULA_BACK_VULNERABLE_DOT = -0.30f;
+static const float BIG_SKULLTULA_FRONT_PROTECTED_DOT = -0.05f;
+static const float BIG_SKULLTULA_CONTACT_RADIUS_BONUS = 0.22f;
+static const float BIG_SKULLTULA_ATTACK_TILT = 0.32f;
+static const float BIG_SKULLTULA_RECOVERY_TILT = -0.18f;
+static const float BIG_SKULLTULA_IDLE_TILT_SWAY = 0.05f;
 static const float GOHMA_LARVA_JUMP_DURATION = 0.7f;
 static const float QUEEN_GOHMA_STUN_DURATION = 4.0f;
 
@@ -128,10 +147,11 @@ static const RenderModelInfo &GetEnemyRenderInfo(const Enemy &enemy, const Enemy
         return render_resources.deku_baba_render_info ? *render_resources.deku_baba_render_info : g_EmptyRenderModelInfo;
     case EnemyType::DEKU_SCRUB:
         return render_resources.deku_scrub_render_info ? *render_resources.deku_scrub_render_info : g_EmptyRenderModelInfo;
-    case EnemyType::QUEEN_GOHMA:
-        return render_resources.queen_gohma_render_info ? *render_resources.queen_gohma_render_info : g_EmptyRenderModelInfo;
     case EnemyType::SKULLWALLTULA:
     case EnemyType::BIG_SKULLTULA:
+        return render_resources.spider_render_info ? *render_resources.spider_render_info : g_EmptyRenderModelInfo;
+    case EnemyType::QUEEN_GOHMA:
+        return render_resources.queen_gohma_render_info ? *render_resources.queen_gohma_render_info : g_EmptyRenderModelInfo;
     case EnemyType::GOHMA_LARVA:
     default:
         return render_resources.sphere_render_info ? *render_resources.sphere_render_info : g_EmptyRenderModelInfo;
@@ -141,8 +161,6 @@ static const RenderModelInfo &GetEnemyRenderInfo(const Enemy &enemy, const Enemy
 static bool IsEnemyUsingPlaceholder(const Enemy &enemy, const EnemyRenderResources &render_resources)
 {
     return !GetEnemyRenderInfo(enemy, render_resources).available ||
-           enemy.type == EnemyType::SKULLWALLTULA ||
-           enemy.type == EnemyType::BIG_SKULLTULA ||
            enemy.type == EnemyType::GOHMA_LARVA;
 }
 
@@ -153,6 +171,9 @@ static glm::mat4 BuildEnemyModelMatrix(const Enemy &enemy, const EnemyRenderReso
         Matrix_Translate(enemy.position.x, enemy.position.y, enemy.position.z) *
         Matrix_Rotate_Y(enemy.yaw);
 
+    if (enemy.type == EnemyType::SKULLWALLTULA || enemy.type == EnemyType::BIG_SKULLTULA)
+        model = model * Matrix_Rotate_X(-PI * 0.5f);
+
     if (std::fabs(enemy.pitch) > 1e-4f)
         model = model * Matrix_Rotate_X(enemy.pitch);
 
@@ -161,6 +182,24 @@ static glm::mat4 BuildEnemyModelMatrix(const Enemy &enemy, const EnemyRenderReso
                 enemy.scale.x * render_info.base_scale,
                 enemy.scale.y * render_info.base_scale,
                 enemy.scale.z * render_info.base_scale);
+
+    if (render_info.available)
+        model = model * Matrix_Translate(-render_info.center.x, -render_info.center.y, -render_info.center.z);
+
+    return model;
+}
+
+static glm::mat4 BuildAnchoredModelMatrix(
+    const glm::vec4 &position,
+    const glm::vec4 &scale,
+    const RenderModelInfo &render_info)
+{
+    glm::mat4 model =
+        Matrix_Translate(position.x, position.y, position.z) *
+        Matrix_Scale(
+            scale.x * render_info.base_scale,
+            scale.y * render_info.base_scale,
+            scale.z * render_info.base_scale);
 
     if (render_info.available)
         model = model * Matrix_Translate(-render_info.center.x, -render_info.center.y, -render_info.center.z);
@@ -180,9 +219,9 @@ static bool EnemyAabbIntersectsPointBox(const Enemy &enemy, const glm::vec4 &cen
     }
     else if (enemy.type == EnemyType::QUEEN_GOHMA)
     {
-        expanded_half_extents.x += 0.12f;
-        expanded_half_extents.y += 0.12f;
-        expanded_half_extents.z += 0.12f;
+        expanded_half_extents.x += 0.04f;
+        expanded_half_extents.y += 0.04f;
+        expanded_half_extents.z += 0.04f;
     }
 
     CollisionAABB enemy_box = {
@@ -206,10 +245,27 @@ static bool BoxesIntersect(
     return AabbAabbIntersect(box_a, box_b);
 }
 
+static bool EnemyBlocksPlayerMovement(const Enemy &enemy)
+{
+    return enemy.active && !enemy.dead && enemy.visible && enemy.blocks_movement;
+}
+
+static bool WouldBlockingEnemyOverlapPlayer(
+    const Enemy &enemy,
+    const glm::vec4 &enemy_position,
+    const glm::vec4 &player_position,
+    const glm::vec4 &player_half_extents)
+{
+    return EnemyBlocksPlayerMovement(enemy) &&
+           BoxesIntersect(enemy_position, enemy.collision_half_extents, player_position, player_half_extents);
+}
+
 static void MoveEnemyWithScenarioCollision(
     Enemy &enemy,
     const glm::vec4 &movement,
-    const std::vector<CollisionShape> &scenario_collision_shapes)
+    const std::vector<CollisionShape> &scenario_collision_shapes,
+    const glm::vec4 &player_position,
+    const glm::vec4 &player_half_extents)
 {
     glm::vec4 updated_position = enemy.position;
     glm::vec4 test_half_extents = enemy.collision_half_extents;
@@ -218,13 +274,17 @@ static void MoveEnemyWithScenarioCollision(
     glm::vec4 test_position_x = updated_position;
     test_position_x.x += movement.x;
     CollisionShapeType collision_x = CollidesWithScenario(test_position_x, scenario_collision_shapes, test_half_extents);
-    if (collision_x != CollisionShapeType::SOLID && collision_x != CollisionShapeType::DOOR)
+    if (collision_x != CollisionShapeType::SOLID &&
+        collision_x != CollisionShapeType::DOOR &&
+        !WouldBlockingEnemyOverlapPlayer(enemy, test_position_x, player_position, player_half_extents))
         updated_position.x = test_position_x.x;
 
     glm::vec4 test_position_z = updated_position;
     test_position_z.z += movement.z;
     CollisionShapeType collision_z = CollidesWithScenario(test_position_z, scenario_collision_shapes, test_half_extents);
-    if (collision_z != CollisionShapeType::SOLID && collision_z != CollisionShapeType::DOOR)
+    if (collision_z != CollisionShapeType::SOLID &&
+        collision_z != CollisionShapeType::DOOR &&
+        !WouldBlockingEnemyOverlapPlayer(enemy, test_position_z, player_position, player_half_extents))
         updated_position.z = test_position_z.z;
 
     enemy.position = updated_position;
@@ -502,48 +562,96 @@ static void UpdateDekuScrub(Enemy &enemy, float delta_time, const EnemyUpdateCon
 static void UpdateSkullwalltula(Enemy &enemy, float delta_time, const EnemyUpdateContext &context)
 {
     (void)delta_time;
-    enemy.position.x = enemy.spawn_position.x + 0.12f * std::sin(enemy.animation_timer * 0.7f);
-    enemy.position.y = enemy.spawn_position.y;
-    enemy.yaw = ComputeYawToTarget(enemy.position, context.player_position);
+    enemy.position.x = enemy.spawn_position.x;
+    enemy.position.z = enemy.spawn_position.z;
+    enemy.yaw = enemy.timer_b;
     enemy.vulnerable = true;
+    enemy.pitch = 0.0f;
+    const float distance_to_player = DistanceXZ(enemy.position, context.player_position);
 
-    if (DistanceXZ(enemy.position, context.player_position) <= enemy.attack_radius)
+    switch (enemy.state)
+    {
+    case EnemyState::Idle:
+        if (enemy.state_timer >= 0.2f)
+        {
+            enemy.state = EnemyState::Patrol;
+            enemy.state_timer = 0.0f;
+        }
+        enemy.position.y = enemy.spawn_position.y;
+        break;
+
+    case EnemyState::Patrol:
+        enemy.position.y =
+            enemy.spawn_position.y +
+            std::sin(enemy.animation_timer * SKULLWALLTULA_SPEED + enemy.timer_a) * SKULLWALLTULA_VERTICAL_RANGE;
+        break;
+
+    default:
+        enemy.state = EnemyState::Idle;
+        enemy.state_timer = 0.0f;
+        enemy.position.y = enemy.spawn_position.y;
+        break;
+    }
+
+    if (distance_to_player <= SKULLWALLTULA_ALERT_RADIUS)
+    {
+        const float proximity = 1.0f - Clamp01(distance_to_player / SKULLWALLTULA_ALERT_RADIUS);
+        enemy.pitch = SKULLWALLTULA_ATTACK_TILT * proximity;
+    }
+
+    if (EnemyAabbIntersectsPointBox(
+            enemy,
+            context.player_position,
+            context.player_half_extents + glm::vec4(SKULLWALLTULA_CONTACT_RADIUS_BONUS)))
     {
         LogPlayerHitByEnemy("Skullwalltula");
-        // TODO: Aplicar dano/knockback ao jogador ao aproximar de Skullwalltula.
+        // TODO: Integrar dano/knockback ao jogador e interacao com o sistema de escalada.
     }
 }
 
 static void UpdateBigSkulltula(Enemy &enemy, float delta_time, const EnemyUpdateContext &context)
 {
-    const glm::vec4 to_player = NormalizeXZ(context.player_position - enemy.position);
+    const glm::vec4 raw_to_player = context.player_position - enemy.position;
+    const glm::vec4 to_player = NormalizeXZ(raw_to_player);
     const glm::vec4 enemy_forward = ForwardFromYaw(enemy.yaw);
     const float front_dot = dotproduct(enemy_forward, to_player);
+    const float distance_to_player = DistanceXZ(enemy.position, context.player_position);
+    const float target_yaw = ComputeYawToTarget(enemy.position, context.player_position);
 
-    enemy.yaw = WrapAnglePi(enemy.yaw + 0.55f * delta_time);
     enemy.vulnerable = false;
+    enemy.pitch = BIG_SKULLTULA_IDLE_TILT_SWAY * std::sin(enemy.animation_timer * 1.8f);
 
     switch (enemy.state)
     {
-    case EnemyState::Idle:
     case EnemyState::Turning:
+    case EnemyState::Idle:
         enemy.state = EnemyState::Turning;
-        if (front_dot < -0.25f)
+        enemy.yaw = SmoothFollowAngle(enemy.yaw, target_yaw, BIG_SKULLTULA_TURN_SPEED, delta_time);
+        if (distance_to_player <= BIG_SKULLTULA_ATTACK_RADIUS && enemy.attack_cooldown_timer <= 0.0f)
+        {
+            enemy.state = EnemyState::Attacking;
+            enemy.state_timer = 0.0f;
+        }
+        else if (front_dot <= BIG_SKULLTULA_BACK_VULNERABLE_DOT)
         {
             enemy.state = EnemyState::Vulnerable;
             enemy.state_timer = 0.0f;
         }
-        else if (DistanceXZ(enemy.position, context.player_position) <= enemy.attack_radius &&
-                 enemy.attack_cooldown_timer <= 0.0f)
+        break;
+
+    case EnemyState::Recovering:
+        enemy.pitch = BIG_SKULLTULA_RECOVERY_TILT;
+        if (enemy.state_timer >= BIG_SKULLTULA_RECOVERY_DURATION)
         {
-            enemy.state = EnemyState::Attacking;
+            enemy.state = EnemyState::Vulnerable;
             enemy.state_timer = 0.0f;
         }
         break;
 
     case EnemyState::Vulnerable:
         enemy.vulnerable = true;
-        if (front_dot >= -0.05f || enemy.state_timer >= BIG_SKULLTULA_VULNERABLE_DURATION)
+        enemy.pitch = BIG_SKULLTULA_RECOVERY_TILT * 0.5f;
+        if (enemy.state_timer >= BIG_SKULLTULA_VULNERABLE_DURATION)
         {
             enemy.state = EnemyState::Turning;
             enemy.state_timer = 0.0f;
@@ -552,17 +660,28 @@ static void UpdateBigSkulltula(Enemy &enemy, float delta_time, const EnemyUpdate
 
     case EnemyState::Attacking:
     {
-        const glm::vec4 dash = ForwardFromYaw(enemy.yaw) * (1.8f * delta_time);
-        MoveEnemyWithScenarioCollision(enemy, dash, *context.scenario_collision_shapes);
+        const float attack_progress = Clamp01(enemy.state_timer / BIG_SKULLTULA_ATTACK_DURATION);
+        enemy.pitch = BIG_SKULLTULA_ATTACK_TILT * std::sin(attack_progress * PI);
+        enemy.yaw = SmoothFollowAngle(enemy.yaw, target_yaw, BIG_SKULLTULA_TURN_SPEED * 1.35f, delta_time);
+        const glm::vec4 dash = ForwardFromYaw(enemy.yaw) * (BIG_SKULLTULA_ATTACK_SPEED * delta_time);
+        MoveEnemyWithScenarioCollision(
+            enemy,
+            dash,
+            *context.scenario_collision_shapes,
+            context.player_position,
+            context.player_half_extents);
 
         if (enemy.state_timer >= BIG_SKULLTULA_ATTACK_DURATION)
         {
             enemy.attack_cooldown_timer = enemy.attack_cooldown;
-            enemy.state = EnemyState::Vulnerable;
+            enemy.state = EnemyState::Recovering;
             enemy.state_timer = 0.0f;
         }
 
-        if (DistanceXZ(enemy.position, context.player_position) <= enemy.attack_radius + 0.45f)
+        if (EnemyAabbIntersectsPointBox(
+                enemy,
+                context.player_position,
+                context.player_half_extents + glm::vec4(BIG_SKULLTULA_CONTACT_RADIUS_BONUS)))
             LogPlayerHitByEnemy("Big Skulltula");
         // TODO: Aplicar dano no contato da investida/giro quando houver vida do jogador.
         break;
@@ -598,7 +717,12 @@ static void UpdateGohmaLarva(Enemy &enemy, float delta_time, const EnemyUpdateCo
     {
         const glm::vec4 direction = NormalizeXZ(delta_to_player);
         enemy.yaw = ComputeYawToTarget(enemy.position, context.player_position);
-        MoveEnemyWithScenarioCollision(enemy, direction * (1.9f * delta_time), *context.scenario_collision_shapes);
+        MoveEnemyWithScenarioCollision(
+            enemy,
+            direction * (1.9f * delta_time),
+            *context.scenario_collision_shapes,
+            context.player_position,
+            context.player_half_extents);
 
         if (distance_to_player <= enemy.attack_radius && enemy.attack_cooldown_timer <= 0.0f)
         {
@@ -613,7 +737,12 @@ static void UpdateGohmaLarva(Enemy &enemy, float delta_time, const EnemyUpdateCo
     {
         const glm::vec4 direction = NormalizeXZ(delta_to_player);
         enemy.yaw = ComputeYawToTarget(enemy.position, context.player_position);
-        MoveEnemyWithScenarioCollision(enemy, direction * (3.6f * delta_time), *context.scenario_collision_shapes);
+        MoveEnemyWithScenarioCollision(
+            enemy,
+            direction * (3.6f * delta_time),
+            *context.scenario_collision_shapes,
+            context.player_position,
+            context.player_half_extents);
 
         const float jump_progress = Clamp01(enemy.state_timer / GOHMA_LARVA_JUMP_DURATION);
         enemy.position.y = enemy.spawn_position.y + std::sin(jump_progress * PI) * 0.45f;
@@ -675,7 +804,12 @@ static void UpdateQueenGohma(Enemy &enemy, float delta_time, const EnemyUpdateCo
     case EnemyState::BossAttack:
     {
         const glm::vec4 dash = ForwardFromYaw(enemy.yaw) * (2.1f * delta_time);
-        MoveEnemyWithScenarioCollision(enemy, dash, *context.scenario_collision_shapes);
+        MoveEnemyWithScenarioCollision(
+            enemy,
+            dash,
+            *context.scenario_collision_shapes,
+            context.player_position,
+            context.player_half_extents);
         enemy.vulnerable = (enemy.state_timer >= 0.55f);
 
         if (enemy.state_timer >= 1.2f)
@@ -796,29 +930,34 @@ void InitializeEnemies(const glm::vec4 &hardcoded_test_spawn_position)
     Enemy skullwalltula = MakeEnemy(
         EnemyType::SKULLWALLTULA,
         EnemyState::Idle,
-        glm::vec4(-1.9f, test_ground_y, 5.2f, 1.0f),
-        glm::vec4(1.20f, 1.20f, 1.20f, 0.0f),
-        glm::vec4(0.90f, 1.30f, 0.50f, 0.0f),
+        glm::vec4(1.8f, test_ground_y, -2.4f, 1.0f),
+        glm::vec4(SKULLWALLTULA_SCALE, SKULLWALLTULA_SCALE, SKULLWALLTULA_SCALE, 0.0f),
+        glm::vec4(0.58f, 0.76f, 0.58f, 0.0f),
         2,
         0.0f,
         1.1f,
         0.0f,
-        "skullwalltula_placeholder");
-    skullwalltula.debug_color = glm::vec4(0.88f, 0.18f, 0.18f, 1.0f);
+        "Only_Spider_with_Animations_Export");
+    skullwalltula.timer_a = 0.35f;
+    skullwalltula.timer_b = PI;
+    skullwalltula.blocks_movement = true;
+    skullwalltula.debug_color = glm::vec4(0.72f, 0.72f, 0.72f, 1.0f);
     g_Enemies.push_back(skullwalltula);
 
     Enemy big_skulltula = MakeEnemy(
         EnemyType::BIG_SKULLTULA,
         EnemyState::Turning,
-        glm::vec4(8.6f, test_ground_y, 5.1f, 1.0f),
-        glm::vec4(2.70f, 2.70f, 2.70f, 0.0f),
-        glm::vec4(1.40f, 1.50f, 1.40f, 0.0f),
+        glm::vec4(4.9f, test_ground_y, -3.1f, 1.0f),
+        glm::vec4(BIG_SKULLTULA_SCALE, BIG_SKULLTULA_SCALE, BIG_SKULLTULA_SCALE, 0.0f),
+        glm::vec4(0.72f, 0.72f, 0.72f, 0.0f),
         3,
         0.0f,
-        1.8f,
-        2.4f,
-        "big_skulltula_placeholder");
-    big_skulltula.debug_color = glm::vec4(0.96f, 0.58f, 0.14f, 1.0f);
+        BIG_SKULLTULA_ATTACK_RADIUS,
+        BIG_SKULLTULA_COOLDOWN,
+        "Only_Spider_with_Animations_Export");
+    big_skulltula.yaw = -PI * 0.5f;
+    big_skulltula.blocks_movement = true;
+    big_skulltula.debug_color = glm::vec4(0.22f, 0.22f, 0.22f, 1.0f);
     g_Enemies.push_back(big_skulltula);
 
     Enemy larva = MakeEnemy(
@@ -841,7 +980,7 @@ void InitializeEnemies(const glm::vec4 &hardcoded_test_spawn_position)
         EnemyState::BossIdle,
         glm::vec4(13.8f, test_ground_y, -1.6f, 1.0f),
         glm::vec4(1.0f, 1.0f, 1.0f, 0.0f),
-        glm::vec4(1.45f, 1.25f, 1.45f, 0.0f),
+        glm::vec4(1.10f, 0.95f, 1.10f, 0.0f),
         8,
         12.0f,
         3.2f,
@@ -946,8 +1085,32 @@ void DrawEnemies(const EnemyDrawContext &context)
         if (!render_info.available || render_info.object_names.empty())
             continue;
 
+        if (enemy.type == EnemyType::DEKU_SCRUB &&
+            context.render_resources.deku_scrub_plant_render_info &&
+            context.render_resources.deku_scrub_plant_render_info->available &&
+            !context.render_resources.deku_scrub_plant_render_info->object_names.empty())
+        {
+            const RenderModelInfo &plant_render_info = *context.render_resources.deku_scrub_plant_render_info;
+            const glm::vec4 plant_position =
+                enemy.spawn_position + glm::vec4(0.0f, DEKU_SCRUB_PLANT_Y_OFFSET, 0.0f, 0.0f);
+            const glm::mat4 plant_model = BuildAnchoredModelMatrix(plant_position, enemy.scale, plant_render_info);
+            glUniformMatrix4fv(context.model_uniform, 1, GL_FALSE, glm::value_ptr(plant_model));
+            glUniform1i(context.object_id_uniform, context.object_id_enemy);
+            glUniform1i(context.cube_colliding_uniform, 0);
+            glUniform3f(context.object_tint_uniform, 1.0f, 1.0f, 1.0f);
+
+            glDisable(GL_CULL_FACE);
+            for (std::size_t object_index = 0; object_index < plant_render_info.object_names.size(); ++object_index)
+                context.draw_virtual_object(plant_render_info.object_names[object_index].c_str());
+            glEnable(GL_CULL_FACE);
+        }
+
         const glm::mat4 model = BuildEnemyModelMatrix(enemy, context.render_resources);
         const bool using_placeholder = IsEnemyUsingPlaceholder(enemy, context.render_resources);
+        const bool use_enemy_tint =
+            using_placeholder ||
+            enemy.type == EnemyType::SKULLWALLTULA ||
+            enemy.type == EnemyType::BIG_SKULLTULA;
         glUniformMatrix4fv(context.model_uniform, 1, GL_FALSE, glm::value_ptr(model));
         glUniform1i(
             context.object_id_uniform,
@@ -955,12 +1118,18 @@ void DrawEnemies(const EnemyDrawContext &context)
         glUniform1i(context.cube_colliding_uniform, 0);
         glUniform3f(
             context.object_tint_uniform,
-            using_placeholder ? enemy.debug_color.x : 1.0f,
-            using_placeholder ? enemy.debug_color.y : 1.0f,
-            using_placeholder ? enemy.debug_color.z : 1.0f);
+            use_enemy_tint ? enemy.debug_color.x : 1.0f,
+            use_enemy_tint ? enemy.debug_color.y : 1.0f,
+            use_enemy_tint ? enemy.debug_color.z : 1.0f);
+
+        if (enemy.type == EnemyType::DEKU_SCRUB)
+            glDisable(GL_CULL_FACE);
 
         for (std::size_t object_index = 0; object_index < render_info.object_names.size(); ++object_index)
             context.draw_virtual_object(render_info.object_names[object_index].c_str());
+
+        if (enemy.type == EnemyType::DEKU_SCRUB)
+            glEnable(GL_CULL_FACE);
     }
 }
 
@@ -1034,4 +1203,19 @@ void ApplyPlayerProjectileDamageToEnemy(int enemy_index, int damage)
         return;
 
     ApplyDamageToEnemy(g_Enemies[enemy_index], damage);
+}
+
+bool QueryBlockingEnemyCollision(const glm::vec4 &center, const glm::vec4 &half_extents)
+{
+    for (std::size_t i = 0; i < g_Enemies.size(); ++i)
+    {
+        const Enemy &enemy = g_Enemies[i];
+        if (!EnemyBlocksPlayerMovement(enemy))
+            continue;
+
+        if (BoxesIntersect(center, half_extents, enemy.position, enemy.collision_half_extents))
+            return true;
+    }
+
+    return false;
 }
