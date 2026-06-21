@@ -4,6 +4,7 @@
 #include <cstdlib>
 
 // Headers abaixo são específicos de C++
+#include <iostream>
 #include <set>
 #include <map>
 #include <stack>
@@ -36,6 +37,7 @@
 #include "types.h"
 #include "globals.h"
 #include "movement.h"
+#include "AssimpModelLoader.h"
 
 GLuint LoadTextureImage(const char *filename); // Função que carrega imagens de textura
 
@@ -121,6 +123,7 @@ void PopMatrix(glm::mat4 &M);
 // Declaração de várias funções utilizadas em main().  Essas estão definidas
 // logo após a definição de main() neste arquivo.
 void BuildTrianglesAndAddToVirtualScene(ObjModel *);                          // Constrói representação de um ObjModel como malha de triângulos para renderização
+void BuildTrianglesFromAssimpAndAddToVirtualScene(AssimpModelLoader &loader); // Constrói representação de um modelo Assimp como malha de triângulos para renderização
 void ComputeNormals(ObjModel *model);                                         // Computa normais de um ObjModel, caso não existam.
 void LoadShadersFromFiles();                                                  // Carrega os shaders de vértice e fragmento, criando um programa de GPU
 void DrawVirtualObject(const char *object_name);                              // Desenha um objeto armazenado em g_VirtualScene
@@ -258,12 +261,23 @@ bool g_ShowInfoText = true;
 // Variáveis que definem um programa de GPU (shaders). Veja função LoadShadersFromFiles().
 GLuint g_GpuProgramID = 0;
 GLint g_model_uniform;
+GLint g_model_normal_matrix_uniform;
 GLint g_view_uniform;
 GLint g_projection_uniform;
 GLint g_object_id_uniform;
 GLint g_bbox_min_uniform;
 GLint g_bbox_max_uniform;
 GLint g_cube_colliding_uniform;
+
+// Uniforms para animação e texturas do jogador
+GLint g_bones_uniform[100];
+GLint g_use_animation_uniform;
+GLint g_player_texture_uniform;
+GLint g_has_player_texture_uniform;
+GLint g_material_diffuse_uniform;
+GLint g_material_specular_uniform;
+GLint g_material_ambient_uniform;
+GLint g_material_shininess_uniform;
 
 // Número de texturas carregadas pela função LoadTextureImage()
 GLuint g_NumLoadedTextures = 0;
@@ -273,6 +287,20 @@ const int OBJECT_ID_PLAYER_CUBE = 4;
 const int OBJECT_ID_DEBUG_CUBE = 6;
 const int OBJECT_ID_SPHERE = 0;
 const int OBJECT_ID_PROJECTILE = 5;
+const int OBJECT_ID_PLAYER = 7;
+
+// Variáveis para o modelo do jogador e animação
+AssimpModelLoader g_PlayerModelLoader;
+float g_PlayerAnimationTime = 0.0f;
+float g_AnimationSpeedMultiplier = 1.0f;
+static int g_AnimDebugFrameCounter = 0;
+static const int g_AnimDebugPrintInterval = 120;
+std::vector<glm::mat4> g_PlayerAnimationTransforms;
+GLuint g_PlayerTextureID = 0;
+bool g_HasPlayerTexture = false;
+std::vector<GLuint> g_PlayerMeshTextureIDs; // Textura por mesh do jogador
+
+// Animações
 
 glm::vec4 camera_position_c;
 glm::vec4 camera_lookat_l;
@@ -292,6 +320,90 @@ void BuildDebugWireframeCube();
 void DrawDebugAABB(const glm::vec4 &center, const glm::vec4 &half_extents, const glm::vec4 &color);
 void BuildDebugArrowVAO();
 void DrawDebugArrow(const glm::vec4 &origin, const glm::vec4 &direction, const glm::vec4 &color);
+
+static float ComputeStrideLength(AssimpModelLoader &loader, int animIdx,
+                                 float modelScale, const char *animLabel)
+{
+    if (animIdx < 0 || animIdx >= (int)loader.GetAnimations().size()) {
+        printf("[STRIDE] %s: invalid animIdx=%d, skipping\n", animLabel, animIdx);
+        return 0.0f;
+    }
+
+    float cycleSec = loader.GetAnimationDurationSeconds(animIdx);
+    if (cycleSec <= 0.0f) {
+        printf("[STRIDE] %s: duration=%.4f, skipping\n", animLabel, cycleSec);
+        return 0.0f;
+    }
+
+    const char *hipsBone = "mixamorig:Hips";
+    if (!loader.HasBone(hipsBone)) {
+        printf("[STRIDE] %s: no Hips bone, skipping\n", animLabel);
+        return 0.0f;
+    }
+
+    // Amostra deslocamento do Hips (root motion) ao longo de 1 ciclo
+    const int numSamples = 100;
+    float minZ = 1e10f, maxZ = -1e10f;
+    float minX = 1e10f, maxX = -1e10f;
+
+    for (int s = 0; s < numSamples; s++) {
+        float t = ((float)s / (float)(numSamples - 1)) * cycleSec;
+        loader.SampleBoneHierarchy(animIdx, t);
+        glm::vec3 pos = loader.GetLastSampledBonePos(hipsBone);
+        if (pos.z < minZ) minZ = pos.z;
+        if (pos.z > maxZ) maxZ = pos.z;
+        if (pos.x < minX) minX = pos.x;
+        if (pos.x > maxX) maxX = pos.x;
+    }
+
+    float strideX = maxX - minX;
+    float strideZ = maxZ - minZ;
+    float strideModel = sqrtf(strideX * strideX + strideZ * strideZ);
+
+    // Se Hips quase não se desloca (in-place), mede pelo pé como fallback
+    if (strideModel < 0.01f) {
+        const char *footBone = "mixamorig:LeftFoot";
+        if (!loader.HasBone(footBone))
+            footBone = "mixamorig:RightFoot";
+        if (loader.HasBone(footBone)) {
+            minX = minZ = 1e10f; maxX = maxZ = -1e10f;
+            for (int s = 0; s < numSamples; s++) {
+                float t = ((float)s / (float)(numSamples - 1)) * cycleSec;
+                loader.SampleBoneHierarchy(animIdx, t);
+                glm::vec3 pos = loader.GetLastSampledBonePos(footBone);
+                if (pos.z < minZ) minZ = pos.z;
+                if (pos.z > maxZ) maxZ = pos.z;
+                if (pos.x < minX) minX = pos.x;
+                if (pos.x > maxX) maxX = pos.x;
+            }
+            strideX = maxX - minX;
+            strideZ = maxZ - minZ;
+            strideModel = sqrtf(strideX * strideX + strideZ * strideZ);
+            hipsBone = footBone;
+            printf("[STRIDE] %s (in-place, using %s instead of Hips)\n", animLabel, footBone);
+        }
+    }
+
+    float strideWorld = strideModel * modelScale;
+    float speed = strideWorld / cycleSec;
+
+    printf("[STRIDE] %s animIdx=%d bone='%s' cycleDur=%.4fs\n",
+           animLabel, animIdx, hipsBone, cycleSec);
+    printf("[STRIDE] %s modelStride=%.4f (X=%.4f Z=%.4f) worldStride=%.4f speed=%.4f u/s\n",
+           animLabel, strideModel, strideX, strideZ, strideWorld, speed);
+
+    printf("[STRIDE] %s %sZ samples (every 10%%):", animLabel, hipsBone);
+    for (int s = 0; s < numSamples; s += 10) {
+        float t = ((float)s / (float)(numSamples - 1)) * cycleSec;
+        loader.SampleBoneHierarchy(animIdx, t);
+        glm::vec3 pos = loader.GetLastSampledBonePos(hipsBone);
+        printf(" %.1f", pos.z);
+    }
+    printf("\n");
+
+    return speed;
+}
+
 struct SlingshotState
 {
     bool is_charging;
@@ -847,7 +959,7 @@ int main()
     // Path do mapa
     const std::string scene_map_path = ResolveScene00Path(g_SceneMapPath, "assets/scenes/scene00/map.obj");
     const std::string scene_collision_path = ResolveScene00Path(g_SceneCollisionPath, "assets/scenes/scene00/collision.obj");
-    const std::string player_model_path = ResolveScene00Path("../../assets/char/child_link_clean.obj", "assets/char/child_link_clean.obj");
+    const std::string player_model_path = ResolveScene00Path("../../Sword and Shield Pack/childlink_v2_clean.fbx", "Sword and Shield Pack/childlink_v2_clean.fbx");
     const std::string fairy_model_path = ResolveScene00Path("../../assets/navi/Navi.obj", "assets/navi/Navi.obj");
 
     // Carregamos o mapa da cena para renderização.
@@ -875,19 +987,147 @@ int main()
     glm::vec4 collision_bbox_min, collision_bbox_max;
     ComputeObjBounds(&scenario_collision_model, collision_bbox_min, collision_bbox_max);
 
-    // Carregamos o modelo visual do personagem principal.
-    ObjModel player_model(player_model_path.c_str());
-    ComputeNormals(&player_model);
-    BuildTrianglesAndAddToVirtualScene(&player_model);
-    glm::vec4 player_model_bbox_min, player_model_bbox_max;
-    ComputeObjBounds(&player_model, player_model_bbox_min, player_model_bbox_max);
+    // Carregamos o modelo visual do personagem principal usando Assimp (FBX).
+    if (!g_PlayerModelLoader.LoadModel(player_model_path)) {
+        fprintf(stderr, "ERROR: Failed to load player model from %s\n", player_model_path.c_str());
+        std::exit(EXIT_FAILURE);
+    }
+    
+    // Carrega animações separadamente
+    std::string walkAnimPath = ResolveScene00Path("../../Sword and Shield Pack/sword and shield walk.fbx", "Sword and Shield Pack/sword and shield walk.fbx");
+    printf("Walk animation path resolved: '%s'\n", walkAnimPath.c_str());
+    if (!g_PlayerModelLoader.AddAnimation(walkAnimPath)) {
+        printf("WARNING: Could not load walk animation from %s\n", walkAnimPath.c_str());
+    }
+    
+    std::string idleAnimPath = ResolveScene00Path("../../Sword and Shield Pack/sword and shield idle.fbx", "Sword and Shield Pack/sword and shield idle.fbx");
+    if (!g_PlayerModelLoader.AddAnimation(idleAnimPath)) {
+        printf("WARNING: Could not load idle animation from %s\n", idleAnimPath.c_str());
+    }
+    
+    std::string runAnimPath = ResolveScene00Path("../../Sword and Shield Pack/sword and shield run.fbx", "Sword and Shield Pack/sword and shield run.fbx");
+    printf("Run animation path resolved: '%s'\n", runAnimPath.c_str());
+    if (!g_PlayerModelLoader.AddAnimation(runAnimPath)) {
+        printf("WARNING: Could not load run animation from %s\n", runAnimPath.c_str());
+    }
+    
+    std::string attackAnimPath = ResolveScene00Path("../../Sword and Shield Pack/sword and shield attack.fbx", "Sword and Shield Pack/sword and shield attack.fbx");
+    printf("Attack animation path resolved: '%s'\n", attackAnimPath.c_str());
+    if (!g_PlayerModelLoader.AddAnimation(attackAnimPath)) {
+        printf("WARNING: Could not load attack animation from %s\n", attackAnimPath.c_str());
+    }
+    
+    std::string blockAnimPath = ResolveScene00Path("../../Sword and Shield Pack/sword and shield block idle.fbx", "Sword and Shield Pack/sword and shield block idle.fbx");
+    printf("Block idle animation path resolved: '%s'\n", blockAnimPath.c_str());
+    if (!g_PlayerModelLoader.AddAnimation(blockAnimPath)) {
+        printf("WARNING: Could not load block idle animation from %s\n", blockAnimPath.c_str());
+    }
+    
+    std::string jumpAnimPath = ResolveScene00Path("../../Sword and Shield Pack/sword and shield jump.fbx", "Sword and Shield Pack/sword and shield jump.fbx");
+    printf("Jump animation path resolved: '%s'\n", jumpAnimPath.c_str());
+    if (!g_PlayerModelLoader.AddAnimation(jumpAnimPath)) {
+        printf("WARNING: Could not load jump animation from %s\n", jumpAnimPath.c_str());
+    }
+    
+    printf("Total animations loaded: %zu\n", g_PlayerModelLoader.GetAnimations().size());
+    
+    BuildTrianglesFromAssimpAndAddToVirtualScene(g_PlayerModelLoader);
+    
+    // Calcula o AABB do modelo do personagem
+    glm::vec4 player_model_bbox_min = glm::vec4(+std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), 1.0f);
+    glm::vec4 player_model_bbox_max = glm::vec4(-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), 1.0f);
+    
+    const auto &player_meshes = g_PlayerModelLoader.GetMeshes();
+    for (const auto &mesh : player_meshes) {
+        for (size_t i = 0; i < mesh.vertices.size() / 3; ++i) {
+            const float vx = mesh.vertices[3 * i + 0];
+            const float vy = mesh.vertices[3 * i + 1];
+            const float vz = mesh.vertices[3 * i + 2];
+            player_model_bbox_min.x = std::min(player_model_bbox_min.x, vx);
+            player_model_bbox_min.y = std::min(player_model_bbox_min.y, vy);
+            player_model_bbox_min.z = std::min(player_model_bbox_min.z, vz);
+            player_model_bbox_max.x = std::max(player_model_bbox_max.x, vx);
+            player_model_bbox_max.y = std::max(player_model_bbox_max.y, vy);
+            player_model_bbox_max.z = std::max(player_model_bbox_max.z, vz);
+        }
+    }
 
     std::vector<std::string> player_model_object_names;
-    player_model_object_names.reserve(player_model.shapes.size());
-    for (size_t i = 0; i < player_model.shapes.size(); ++i)
+    player_model_object_names.reserve(player_meshes.size());
+    for (size_t i = 0; i < player_meshes.size(); ++i)
     {
-        player_model_object_names.push_back(player_model.shapes[i].name);
+        player_model_object_names.push_back(player_meshes[i].name);
     }
+
+    // Carrega texturas por mesh do jogador baseado no MTL
+    // Mapeamento: mesh_index -> texture_file
+    // baseado na correspondência de contagem de faces entre OBJ e FBX
+    struct MeshTextureMapping {
+        size_t meshIndex;
+        const char* textureFile;
+    };
+    
+    const std::vector<MeshTextureMapping> meshTextureMap = {
+        {0,  "../../assets/char/childlink_02.png"},   // pants/gloves (47f)
+        {1,  "../../assets/char/childlink_02.png"},   // pants/gloves (47f)
+        {2,  "../../assets/char/c_mouth01.png"},      // mouth (46f)
+        {3,  "../../assets/char/childlink_02.png"},   // pants/gloves (51f)
+        {4,  "../../assets/char/childlink_01.png"},   // tunic (308f)
+        {5,  "../../assets/char/childlink_00.png"},   // skin (549f)
+        {6,  "../../assets/char/c_eye01.png"},        // eyes (79f)
+        {7,  "../../assets/char/c_mouth01.png"},      // mouth (46f)
+        {8,  "../../assets/char/childlink_01.png"},   // tunic (84f)
+        {9,  "../../assets/char/childlink_f01.png"},  // hair2 (138f)
+        {10, "../../assets/char/childlink_f00.png"},  // hair (242f)
+        {11, "../../assets/char/c_eye01.png"},        // eyes (68f)
+    };
+    
+    g_PlayerMeshTextureIDs.resize(player_meshes.size(), 0);
+    
+    // Cache de texturas para não carregar a mesma duas vezes
+    std::map<std::string, GLuint> textureCache;
+    
+    stbi_set_flip_vertically_on_load(false);
+    
+    for (const auto& mapping : meshTextureMap) {
+        if (mapping.meshIndex >= player_meshes.size()) continue;
+        
+        std::string texFile(mapping.textureFile);
+        
+        auto it = textureCache.find(texFile);
+        if (it != textureCache.end()) {
+            g_PlayerMeshTextureIDs[mapping.meshIndex] = it->second;
+            continue;
+        }
+        
+        int width, height, channels;
+        unsigned char* data = stbi_load(texFile.c_str(), &width, &height, &channels, 4);
+        if (data) {
+            GLuint texID;
+            glGenTextures(1, &texID);
+            glBindTexture(GL_TEXTURE_2D, texID);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+            glGenerateMipmap(GL_TEXTURE_2D);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            
+            g_PlayerMeshTextureIDs[mapping.meshIndex] = texID;
+            textureCache[texFile] = texID;
+            
+            printf("Player mesh %zu texture: '%s' (ID=%u, %dx%d)\n",
+                   mapping.meshIndex, texFile.c_str(), texID, width, height);
+            stbi_image_free(data);
+        } else {
+            printf("WARNING: Could not load texture '%s' for mesh %zu\n",
+                   texFile.c_str(), mapping.meshIndex);
+        }
+    }
+    
+    stbi_set_flip_vertically_on_load(true);
+    
+    g_HasPlayerTexture = true;
 
     const glm::vec4 player_model_center = (player_model_bbox_min + player_model_bbox_max) * 0.5f;
     const glm::vec4 player_model_size = player_model_bbox_max - player_model_bbox_min;
@@ -899,6 +1139,36 @@ int main()
         player_model_size.y * player_model_scale * 0.5f,
         player_model_size.z * player_model_scale * 0.5f,
         0.0f);
+
+    // Mede stride length das animações e sincroniza velocidade de movimento
+    printf("\n=== STRIDE LENGTH COMPUTATION ===\n");
+    {
+        const int walkAnimIdx = 1; // WALK animation index (matches GetAnimationIndex)
+        const int runAnimIdx  = 3; // RUN animation index
+
+        float walkSpeed = ComputeStrideLength(g_PlayerModelLoader, walkAnimIdx,
+                                               player_model_scale, "WALK");
+        float runSpeed  = ComputeStrideLength(g_PlayerModelLoader, runAnimIdx,
+                                               player_model_scale, "RUN");
+
+        if (walkSpeed > 0.0f) {
+            g_PlayerStateMachine.SetWalkSpeed(walkSpeed);
+            printf("[STRIDE] WALK speed updated: %.4f u/s (was 3.5)\n", walkSpeed);
+        } else {
+            printf("[STRIDE] WALK stride failed, keeping default %.4f u/s\n",
+                   g_PlayerStateMachine.GetWalkSpeed());
+        }
+
+        if (runSpeed > 0.0f) {
+            g_PlayerStateMachine.SetRunSpeed(runSpeed);
+            printf("[STRIDE] RUN  speed updated: %.4f u/s (was 6.0)\n", runSpeed);
+        } else {
+            printf("[STRIDE] RUN  stride failed, keeping default %.4f u/s\n",
+                   g_PlayerStateMachine.GetRunSpeed());
+        }
+    }
+    printf("=== END STRIDE COMPUTATION ===\n\n");
+
     // Carregamos o modelo provisório da fada.
     ObjModel fairy_model(fairy_model_path.c_str());
     ComputeNormals(&fairy_model);
@@ -982,6 +1252,18 @@ int main()
                 std::min(g_SlingshotState.charge_time_seconds, g_SlingshotState.max_charge_time_seconds);
         }
 
+        // State machine antes do movimento — precisa de onGround do frame anterior
+        // para detectar transição de pulo (movement.cpp zera onGround internamente)
+        g_PlayerStateMachine.Update(g_WPressed, g_SPressed, g_ShiftPressed,
+                                    g_AttackPressed, g_DefendPressed, g_SpacePressed,
+                                    g_IsClimbingAVine, g_IsClimbingALadder,
+                                    g_PlayerOnGround, delta_time);
+
+        // Consome input de ataque (single-shot)
+        if (g_AttackPressed && g_PlayerStateMachine.GetCurrentState() == PlayerState::ATTACKING) {
+            g_AttackPressed = false;
+        }
+
         float move_input = UpdatePlayerMovement(window, delta_time);
 
         // Aqui executamos as operações de renderização
@@ -1014,11 +1296,18 @@ int main()
             g_CameraYaw = SmoothFollowAngle(g_CameraYaw, camera_target_yaw, g_CameraYawFollowSpeed, delta_time);
             const glm::vec4 camera_back(std::sin(g_CameraYaw), 0.0f, -std::cos(g_CameraYaw), 0.0f);
 
+            // Smooth Y do jogador para a câmera — evita trancos em step climbing
+            static float g_CameraSmoothedPlayerY = g_PlayerCubePosition.y;
+            g_CameraSmoothedPlayerY += (g_PlayerCubePosition.y - g_CameraSmoothedPlayerY)
+                                       * std::min(1.0f, 8.0f * delta_time);
+            glm::vec4 smoothedPlayerPos = g_PlayerCubePosition;
+            smoothedPlayerPos.y = g_CameraSmoothedPlayerY;
+
             const glm::vec4 camera_lookat_world =
-                g_PlayerCubePosition + camera_back * (g_PlayerCubeHalfExtents.z + 0.18f) + glm::vec4(0.0f, g_ThirdPersonLookAtHeight, 0.0f, 0.0f);
+                smoothedPlayerPos + camera_back * (g_PlayerCubeHalfExtents.z + 0.18f) + glm::vec4(0.0f, g_ThirdPersonLookAtHeight, 0.0f, 0.0f);
 
             const glm::vec4 desired_camera_world =
-                g_PlayerCubePosition + camera_back * g_ThirdPersonCameraDistance + glm::vec4(0.0f, g_ThirdPersonCameraHeight, 0.0f, 0.0f);
+                smoothedPlayerPos + camera_back * g_ThirdPersonCameraDistance + glm::vec4(0.0f, g_ThirdPersonCameraHeight, 0.0f, 0.0f);
 
             if (!g_CameraInitialized)
             {
@@ -1115,6 +1404,7 @@ int main()
         glDisable(GL_CULL_FACE);
         model = GetScenarioModelMatrix();
         glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+        glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE, glm::value_ptr(glm::transpose(glm::inverse(model))));
         glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
         glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
         for (size_t i = 0; i < g_ScenarioObjectNames.size(); ++i)
@@ -1128,16 +1418,158 @@ int main()
         // Desenhamos o modelo visual do personagem principal.
 
         glDisable(GL_CULL_FACE);
+        
+        // visualPos = root - rootMotionCancel:
+        //   Os ossos da animação contêm root motion (o Hips anda ~200u/ciclo em
+        //   model-space).  Isso move o modelo visual para longe da hitbox no
+        //   world-space e causa "teletransporte" no wrap do fmod.
+        //   Para cancelar: subtraímos o deslocamento XZ do Hips de visualPos.
+        //   O Y NÃO é subtraído — o bounce vertical já está correto nos ossos.
+        glm::vec4 visualPos = g_PlayerCubePosition;
+        
+        if (g_PlayerModelLoader.GetNumBones() > 0) {
+            glUniform1i(g_use_animation_uniform, 1);
+            
+            int animIdx = g_PlayerStateMachine.GetAnimationIndex();
+            static int g_LastAnimIdx = -1;
+            
+            if (animIdx != g_LastAnimIdx) {
+                g_PlayerAnimationTime = 0.0f;
+                g_LastAnimIdx = animIdx;
+                printf("[ANIM DEBUG] Animation changed to index %d, animation time reset to 0\n", animIdx);
+            }
+            
+            g_PlayerModelLoader.SetCurrentAnimation(animIdx);
+            
+            // Defesa (5) e pulo (6): play once, congela no último frame
+            float tps = g_PlayerModelLoader.GetCurrentTicksPerSecond();
+            float dur = g_PlayerModelLoader.GetCurrentDuration();
+            float durSec = (tps > 0.0f) ? (dur / tps) : 1.0f;
+            bool freezeAtEnd = (animIdx == 5 || animIdx == 6);
+            
+            if (freezeAtEnd && g_PlayerAnimationTime >= durSec - 0.01f) {
+                // Já chegou ao fim, mantém no último frame
+            } else {
+                g_PlayerAnimationTime += delta_time * g_AnimationSpeedMultiplier;
+            }
+            
+            g_AnimDebugFrameCounter++;
+            if (g_AnimDebugFrameCounter % g_AnimDebugPrintInterval == 0) {
+                float timeInTicks = g_PlayerAnimationTime * tps;
+                float animCycleTime = fmod(timeInTicks, dur > 0.0f ? dur : 1.0f);
+                printf("[ANIM DEBUG] time=%.4fs tps=%.2f duration=%.2f ticks=%.2f cycle=%.2f speedMult=%.2f\n",
+                       g_PlayerAnimationTime, tps, dur, timeInTicks, animCycleTime, g_AnimationSpeedMultiplier);
+            }
+            
+            g_PlayerAnimationTransforms.resize(g_PlayerModelLoader.GetNumBones());
+            g_PlayerModelLoader.GetBoneTransforms(g_PlayerAnimationTime, g_PlayerAnimationTransforms);
+            
+            for (size_t i = 0; i < g_PlayerAnimationTransforms.size(); i++) {
+                glUniformMatrix4fv(g_bones_uniform[i], 1, GL_FALSE, glm::value_ptr(g_PlayerAnimationTransforms[i]));
+            }
+            
+            // Cancela root motion dos ossos subtraindo HipsDelta.xz de visualPos
+            // Wrap detection apenas para animações com root motion (WALK=1, RUN=3)
+            const glm::vec4& hipsPos = g_PlayerModelLoader.GetHipsWorldPositionRef();
+            
+            static int       hipsLastAnimIdx = -1;
+            static glm::vec4 hipsRefPos(0.0f, 0.0f, 0.0f, 1.0f);
+            static bool      hipsRefSet = false;
+            static float     prevAnimTick = -1.0f;
+            glm::vec4        hipsDelta(0.0f);
+            
+            bool hasRootMotion = (animIdx == 1 || animIdx == 3); // WALK ou RUN
+            
+            float animTick = fmod(g_PlayerAnimationTime * tps, dur > 0.0f ? dur : 1.0f);
+            bool wrapped = hasRootMotion && prevAnimTick >= 0.0f && animTick < prevAnimTick;
+            prevAnimTick = animTick;
+            
+            if (animIdx != hipsLastAnimIdx || wrapped || !hipsRefSet) {
+                hipsLastAnimIdx = animIdx;
+                hipsRefPos = hipsPos;
+                hipsDelta  = glm::vec4(0.0f);
+                hipsRefSet = true;
+                if (wrapped) {
+                    printf("[HIPS WRAP] Cycle wrapped at animTick=%.2f, " 
+                           "hipsRef reset to (%.2f,%.2f,%.2f)\n",
+                           animTick, hipsPos.x, hipsPos.y, hipsPos.z);
+                }
+            } else {
+                hipsDelta = hipsPos - hipsRefPos;
+            }
+            
+            if (g_AnimDebugFrameCounter % g_AnimDebugPrintInterval == 0) {
+                printf("[HIPS DEBUG] hipsPos=(%.1f,%.1f,%.1f) ref=(%.1f,%.1f,%.1f) "
+                       "delta=(%.1f,%.1f,%.1f)\n",
+                       hipsPos.x, hipsPos.y, hipsPos.z,
+                       hipsRefPos.x, hipsRefPos.y, hipsRefPos.z,
+                       hipsDelta.x, hipsDelta.y, hipsDelta.z);
+            }
+            
+            // Cancela root motion: subtrai XZ, ignora Y (bounce já está nos ossos)
+            glm::vec4 cancelDelta = hipsDelta;
+            cancelDelta.y = 0.0f;
+            
+            glm::vec4 worldCancel = Matrix_Rotate_Y(-g_PlayerYaw)
+                * Matrix_Scale(player_model_scale, player_model_scale, player_model_scale)
+                * cancelDelta;
+            
+            visualPos = g_PlayerCubePosition - worldCancel;
+            
+            {
+                static int cancelLog = 0;
+                cancelLog++;
+                if (cancelLog % 10 == 0) {
+                    glm::vec4 diff = visualPos - g_PlayerCubePosition;
+                    printf("[ROOT CANCEL] delta=(%.1f,%.1f,%.1f) cancel=(%.3f,%.3f,%.3f) "
+                           "visualPos=(%.3f,%.3f,%.3f) root=(%.3f,%.3f,%.3f) diff=(%.3f,%.3f,%.3f)\n",
+                           hipsDelta.x, hipsDelta.y, hipsDelta.z,
+                           worldCancel.x, worldCancel.y, worldCancel.z,
+                           visualPos.x, visualPos.y, visualPos.z,
+                           g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
+                           diff.x, diff.y, diff.z);
+                }
+            }
+        } else {
+            glUniform1i(g_use_animation_uniform, 0);
+        }
 
-        model = Matrix_Translate(g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z) * Matrix_Rotate_Y(-g_PlayerYaw) * Matrix_Scale(player_model_scale, player_model_scale, player_model_scale) * Matrix_Translate(-player_model_center.x, -player_model_center.y, -player_model_center.z);
+        model = Matrix_Translate(visualPos.x, visualPos.y, visualPos.z)
+            * Matrix_Rotate_Y(-g_PlayerYaw)
+            * Matrix_Scale(player_model_scale, player_model_scale, player_model_scale)
+            * Matrix_Translate(-player_model_center.x, -player_model_center.y, -player_model_center.z);
 
         glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
+        glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE, glm::value_ptr(glm::transpose(glm::inverse(model))));
+        glUniform1i(g_object_id_uniform, OBJECT_ID_PLAYER);
         glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
+        
+        // Configura material do jogador
+        if (!g_PlayerModelLoader.GetMaterials().empty()) {
+            const auto& mat = g_PlayerModelLoader.GetMaterials()[0];
+            glUniform3f(g_material_diffuse_uniform, mat.diffuse.x, mat.diffuse.y, mat.diffuse.z);
+            glUniform3f(g_material_specular_uniform, mat.specular.x, mat.specular.y, mat.specular.z);
+            glUniform3f(g_material_ambient_uniform, mat.ambient.x, mat.ambient.y, mat.ambient.z);
+            glUniform1f(g_material_shininess_uniform, mat.shininess);
+        }
+        
+        // Habilita textura do jogador
+        glUniform1i(g_has_player_texture_uniform, g_HasPlayerTexture ? 1 : 0);
+        glUniform1i(g_player_texture_uniform, 3);
+        
+        // Desenha cada mesh do jogador com sua textura
         for (size_t i = 0; i < player_model_object_names.size(); ++i)
         {
+            // Liga a textura específica desta mesh na unit 3
+            if (i < g_PlayerMeshTextureIDs.size() && g_PlayerMeshTextureIDs[i] != 0) {
+                glActiveTexture(GL_TEXTURE3);
+                glBindTexture(GL_TEXTURE_2D, g_PlayerMeshTextureIDs[i]);
+            }
             DrawVirtualObject(player_model_object_names[i].c_str());
         }
+        
+        // Reseta animação
+        glUniform1i(g_use_animation_uniform, 0);
 
         const float fairy_orbit_progress = std::fmod(static_cast<float>(current_frame_time) / g_FairyMotionParams.orbit_period_seconds, 1.0f);
         const glm::vec4 fairy_head_center = g_PlayerCubePosition + glm::vec4(0.0f, g_FairyMotionParams.head_height_offset, 0.0f, 0.0f);
@@ -1188,10 +1620,19 @@ int main()
             glDisable(GL_DEPTH_TEST);
             glDisable(GL_CULL_FACE);
 
-            // Draw player hitbox (green wireframe)
-            glm::vec4 player_color(0.0f, 1.0f, 0.0f, 1.0f);
-            CollisionOBB player_obb = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
-            DrawDebugOBB(player_obb, player_color);
+            // Hitbox (verde) — colisão e visual são a mesma posição agora
+            {
+                glm::vec4 player_color(0.0f, 1.0f, 0.0f, 1.0f);
+                CollisionOBB player_obb = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
+                DrawDebugOBB(player_obb, player_color);
+            }
+
+            if (g_AnimDebugFrameCounter % g_AnimDebugPrintInterval == 0) {
+                printf("[HITBOX DEBUG] pos=(%.4f,%.4f,%.4f) halfExt=(%.4f,%.4f,%.4f) yaw=%.4f\n",
+                       g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
+                       g_PlayerCubeHalfExtents.x, g_PlayerCubeHalfExtents.y, g_PlayerCubeHalfExtents.z,
+                       g_PlayerYaw);
+            }
 
             // Draw ladder hitboxes (yellow wireframe)
             for (size_t i = 0; i < g_ScenarioCollisionShapes.size(); ++i)
@@ -1253,6 +1694,8 @@ int main()
             glFrontFace(GL_CCW);
         }
 
+        // g_PlayerCubePosition nunca foi modificado — não precisa restaurar
+
         // Imprimimos na tela os ângulos de Euler que controlam a rotação do
         // terceiro cubo.
         TextRendering_ShowEulerAngles(window);
@@ -1271,12 +1714,15 @@ int main()
         // tudo que foi renderizado pelas funções acima.
         // Veja o link: https://en.wikipedia.org/w/index.php?title=Multiple_buffering&oldid=793452829#Double_buffering_in_computer_graphics
         glfwSwapBuffers(window);
-
-        // Verificamos com o sistema operacional se houve alguma interação do
-        // usuário (teclado, mouse, ...). Caso positivo, as funções de callback
-        // definidas anteriormente usando glfwSet*Callback() serão chamadas
-        // pela biblioteca GLFW.
         glfwPollEvents();
+
+        // Frame rate cap: 60 FPS
+        const double frame_end_time = glfwGetTime();
+        const double frame_duration = frame_end_time - current_frame_time;
+        const double min_frame_time = 1.0 / 60.0;
+        if (frame_duration < min_frame_time) {
+            glfwWaitEventsTimeout(min_frame_time - frame_duration);
+        }
     }
 
     // Finalizamos o uso dos recursos do sistema operacional
@@ -1347,6 +1793,11 @@ GLuint LoadTextureImage(const char *filename)
 // dos objetos na função BuildTrianglesAndAddToVirtualScene().
 void DrawVirtualObject(const char *object_name)
 {
+    if (g_VirtualScene.find(object_name) == g_VirtualScene.end()) {
+        printf("WARNING: Object '%s' not found in g_VirtualScene!\n", object_name);
+        return;
+    }
+    
     // "Ligamos" o VAO. Informamos que queremos utilizar os atributos de
     // vértices apontados pelo VAO criado pela função BuildTrianglesAndAddToVirtualScene(). Veja
     // comentários detalhados dentro da definição de BuildTrianglesAndAddToVirtualScene().
@@ -1420,18 +1871,35 @@ void LoadShadersFromFiles()
     // Utilizaremos estas variáveis para enviar dados para a placa de vídeo
     // (GPU)! Veja arquivo "shader_vertex.glsl" e "shader_fragment.glsl".
     g_model_uniform = glGetUniformLocation(g_GpuProgramID, "model");           // Variável da matriz "model"
+    g_model_normal_matrix_uniform = glGetUniformLocation(g_GpuProgramID, "model_normal_matrix"); // Matriz de normais precomputada
     g_view_uniform = glGetUniformLocation(g_GpuProgramID, "view");             // Variável da matriz "view" em shader_vertex.glsl
     g_projection_uniform = glGetUniformLocation(g_GpuProgramID, "projection"); // Variável da matriz "projection" em shader_vertex.glsl
     g_object_id_uniform = glGetUniformLocation(g_GpuProgramID, "object_id");   // Variável "object_id" em shader_fragment.glsl
     g_bbox_min_uniform = glGetUniformLocation(g_GpuProgramID, "bbox_min");
     g_bbox_max_uniform = glGetUniformLocation(g_GpuProgramID, "bbox_max");
     g_cube_colliding_uniform = glGetUniformLocation(g_GpuProgramID, "cube_colliding");
+    
+    // Uniforms para animação
+    g_use_animation_uniform = glGetUniformLocation(g_GpuProgramID, "useAnimation");
+    for (int i = 0; i < 100; i++) {
+        std::string boneName = "bones[" + std::to_string(i) + "]";
+        g_bones_uniform[i] = glGetUniformLocation(g_GpuProgramID, boneName.c_str());
+    }
+    
+    // Uniforms para texturas e materiais do jogador
+    g_player_texture_uniform = glGetUniformLocation(g_GpuProgramID, "playerTexture");
+    g_has_player_texture_uniform = glGetUniformLocation(g_GpuProgramID, "hasPlayerTexture");
+    g_material_diffuse_uniform = glGetUniformLocation(g_GpuProgramID, "materialDiffuse");
+    g_material_specular_uniform = glGetUniformLocation(g_GpuProgramID, "materialSpecular");
+    g_material_ambient_uniform = glGetUniformLocation(g_GpuProgramID, "materialAmbient");
+    g_material_shininess_uniform = glGetUniformLocation(g_GpuProgramID, "materialShininess");
 
     // Variáveis em "shader_fragment.glsl" para acesso das imagens de textura
     glUseProgram(g_GpuProgramID);
     glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage0"), 0);
     glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage1"), 1);
     glUniform1i(glGetUniformLocation(g_GpuProgramID, "TextureImage2"), 2);
+    glUniform1i(g_player_texture_uniform, 3);
     glUseProgram(0);
 }
 
@@ -1733,6 +2201,191 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel *model)
 
     // "Desligamos" o VAO, evitando assim que operações posteriores venham a
     // alterar o mesmo. Isso evita bugs.
+    glBindVertexArray(0);
+}
+
+void BuildTrianglesFromAssimpAndAddToVirtualScene(AssimpModelLoader &loader)
+{
+    GLuint vertex_array_object_id;
+    glGenVertexArrays(1, &vertex_array_object_id);
+    glBindVertexArray(vertex_array_object_id);
+
+    std::vector<GLuint> indices;
+    std::vector<float> model_coefficients;
+    std::vector<float> normal_coefficients;
+    std::vector<float> texture_coefficients;
+    std::vector<unsigned int> bone_id_data;
+    std::vector<float> bone_weight_data;
+
+    const auto &meshes = loader.GetMeshes();
+    
+    printf("BuildTrianglesFromAssimp: %zu meshes\n", meshes.size());
+    
+    for (size_t mesh_idx = 0; mesh_idx < meshes.size(); ++mesh_idx)
+    {
+        const auto &mesh = meshes[mesh_idx];
+        size_t first_index = indices.size();
+        
+        printf("  Mesh %zu: name='%s', vertices=%zu, indices=%zu, hasBoneData=%d\n", 
+               mesh_idx, mesh.name.c_str(), mesh.vertices.size()/3, mesh.indices.size(),
+               !mesh.boneData.empty());
+        
+        const float minval = std::numeric_limits<float>::min();
+        const float maxval = std::numeric_limits<float>::max();
+        glm::vec4 bbox_min = glm::vec4(maxval, maxval, maxval, 1.0f);
+        glm::vec4 bbox_max = glm::vec4(minval, minval, minval, 1.0f);
+        
+        for (size_t i = 0; i < mesh.indices.size(); ++i)
+        {
+            unsigned int idx = mesh.indices[i];
+            indices.push_back(first_index + i);
+            
+            const float vx = mesh.vertices[3 * idx + 0];
+            const float vy = mesh.vertices[3 * idx + 1];
+            const float vz = mesh.vertices[3 * idx + 2];
+            model_coefficients.push_back(vx);
+            model_coefficients.push_back(vy);
+            model_coefficients.push_back(vz);
+            model_coefficients.push_back(1.0f);
+            
+            bbox_min.x = std::min(bbox_min.x, vx);
+            bbox_min.y = std::min(bbox_min.y, vy);
+            bbox_min.z = std::min(bbox_min.z, vz);
+            bbox_max.x = std::max(bbox_max.x, vx);
+            bbox_max.y = std::max(bbox_max.y, vy);
+            bbox_max.z = std::max(bbox_max.z, vz);
+            
+            if (!mesh.normals.empty())
+            {
+                const float nx = mesh.normals[3 * idx + 0];
+                const float ny = mesh.normals[3 * idx + 1];
+                const float nz = mesh.normals[3 * idx + 2];
+                normal_coefficients.push_back(nx);
+                normal_coefficients.push_back(ny);
+                normal_coefficients.push_back(nz);
+                normal_coefficients.push_back(0.0f);
+            }
+            
+            if (!mesh.texcoords.empty())
+            {
+                const float u = mesh.texcoords[2 * idx + 0];
+                const float v = mesh.texcoords[2 * idx + 1];
+                texture_coefficients.push_back(u);
+                texture_coefficients.push_back(v);
+            }
+            
+            if (!mesh.boneData.empty())
+            {
+                const auto &bd = mesh.boneData[idx];
+                bone_id_data.push_back(bd.boneIDs[0]);
+                bone_id_data.push_back(bd.boneIDs[1]);
+                bone_id_data.push_back(bd.boneIDs[2]);
+                bone_id_data.push_back(bd.boneIDs[3]);
+                bone_weight_data.push_back(bd.weights[0]);
+                bone_weight_data.push_back(bd.weights[1]);
+                bone_weight_data.push_back(bd.weights[2]);
+                bone_weight_data.push_back(bd.weights[3]);
+            }
+            else
+            {
+                bone_id_data.push_back(0);
+                bone_id_data.push_back(0);
+                bone_id_data.push_back(0);
+                bone_id_data.push_back(0);
+                bone_weight_data.push_back(0.0f);
+                bone_weight_data.push_back(0.0f);
+                bone_weight_data.push_back(0.0f);
+                bone_weight_data.push_back(0.0f);
+            }
+        }
+        
+        size_t last_index = indices.size() - 1;
+        
+        SceneObject theobject;
+        theobject.name = mesh.name;
+        theobject.first_index = first_index;
+        theobject.num_indices = last_index - first_index + 1;
+        theobject.rendering_mode = GL_TRIANGLES;
+        theobject.vertex_array_object_id = vertex_array_object_id;
+        theobject.texture_id = 0;
+        theobject.sampler_id = 0;
+        theobject.bbox_min = bbox_min;
+        theobject.bbox_max = bbox_max;
+        
+        g_VirtualScene[mesh.name] = theobject;
+    }
+    
+    GLuint VBO_model_coefficients_id;
+    glGenBuffers(1, &VBO_model_coefficients_id);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_model_coefficients_id);
+    glBufferData(GL_ARRAY_BUFFER, model_coefficients.size() * sizeof(float), NULL, GL_STATIC_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, model_coefficients.size() * sizeof(float), model_coefficients.data());
+    GLuint location = 0;
+    GLint number_of_dimensions = 4;
+    glVertexAttribPointer(location, number_of_dimensions, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(location);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    
+    if (!normal_coefficients.empty())
+    {
+        GLuint VBO_normal_coefficients_id;
+        glGenBuffers(1, &VBO_normal_coefficients_id);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO_normal_coefficients_id);
+        glBufferData(GL_ARRAY_BUFFER, normal_coefficients.size() * sizeof(float), NULL, GL_STATIC_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, normal_coefficients.size() * sizeof(float), normal_coefficients.data());
+        location = 1;
+        number_of_dimensions = 4;
+        glVertexAttribPointer(location, number_of_dimensions, GL_FLOAT, GL_FALSE, 0, 0);
+        glEnableVertexAttribArray(location);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+    
+    if (!texture_coefficients.empty())
+    {
+        GLuint VBO_texture_coefficients_id;
+        glGenBuffers(1, &VBO_texture_coefficients_id);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO_texture_coefficients_id);
+        glBufferData(GL_ARRAY_BUFFER, texture_coefficients.size() * sizeof(float), NULL, GL_STATIC_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, texture_coefficients.size() * sizeof(float), texture_coefficients.data());
+        location = 2;
+        number_of_dimensions = 2;
+        glVertexAttribPointer(location, number_of_dimensions, GL_FLOAT, GL_FALSE, 0, 0);
+        glEnableVertexAttribArray(location);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+    
+    // Bone IDs (location = 3, ivec4)
+    {
+        GLuint VBO_bone_ids;
+        glGenBuffers(1, &VBO_bone_ids);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO_bone_ids);
+        glBufferData(GL_ARRAY_BUFFER, bone_id_data.size() * sizeof(unsigned int), NULL, GL_STATIC_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, bone_id_data.size() * sizeof(unsigned int), bone_id_data.data());
+        location = 3;
+        glVertexAttribIPointer(location, 4, GL_UNSIGNED_INT, 0, 0);
+        glEnableVertexAttribArray(location);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+    
+    // Bone weights (location = 4, vec4)
+    {
+        GLuint VBO_bone_weights;
+        glGenBuffers(1, &VBO_bone_weights);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO_bone_weights);
+        glBufferData(GL_ARRAY_BUFFER, bone_weight_data.size() * sizeof(float), NULL, GL_STATIC_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, bone_weight_data.size() * sizeof(float), bone_weight_data.data());
+        location = 4;
+        glVertexAttribPointer(location, 4, GL_FLOAT, GL_FALSE, 0, 0);
+        glEnableVertexAttribArray(location);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+    
+    GLuint indices_id;
+    glGenBuffers(1, &indices_id);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indices_id);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(GLuint), NULL, GL_STATIC_DRAW);
+    glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, indices.size() * sizeof(GLuint), indices.data());
+    
     glBindVertexArray(0);
 }
 
@@ -2351,6 +3004,12 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
         g_DPressed = (action != GLFW_RELEASE) && !g_FirstPersonCamera;
     if (key == GLFW_KEY_SPACE)
         g_SpacePressed = (action != GLFW_RELEASE);
+    if (key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT)
+        g_ShiftPressed = (action != GLFW_RELEASE);
+    if (key == GLFW_KEY_E)
+        g_AttackPressed = (action == GLFW_PRESS);
+    if (key == GLFW_KEY_Q)
+        g_DefendPressed = (action != GLFW_RELEASE);
 }
 // Definimos o callback para impressão de erros da GLFW no terminal
 void ErrorCallback(int error, const char *description)
