@@ -24,11 +24,13 @@ uniform mat4 projection;
 #define PLANE  2
 #define SCENARIO 3
 #define PLAYER_CUBE 4
-#define DEBUG_CUBE 6
 #define PROJECTILE 5
+#define DEBUG_CUBE 6
+#define ENEMY 7
 uniform int object_id;
 uniform int cube_colliding;
 uniform vec4 debug_color;
+uniform vec3 object_tint;
 
 // Parametros da axis-aligned bounding box (AABB) do modelo
 uniform vec4 bbox_min;
@@ -81,7 +83,7 @@ void main()
     if ( object_id == SPHERE )
     {
         float pulse = 0.75 + 0.25 * max(0.0, n.y);
-        Kd0 = pulse * vec3(0.55, 0.95, 0.70);
+        Kd0 = pulse * object_tint.rgb;
         alpha = 1.0;
     }
     else if ( object_id == BUNNY )
@@ -142,6 +144,12 @@ void main()
     {
         Kd0 = vec3(0.46, 0.28, 0.12);
         alpha = 1.0;
+    }
+    else if ( object_id == ENEMY )
+    {
+        vec4 tex_color = texture(TextureImage0, texcoords);
+        Kd0 = tex_color.rgb;
+        alpha = tex_color.a;
     }
 
     // Equacao de Iluminacao
