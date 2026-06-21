@@ -141,7 +141,7 @@ void PrintObjModelInfo(ObjModel *);                                           //
 void BuildUnitCubeAndAddToVirtualScene(const char *object_name);              // Constrói cubo unitário para teste de colisão
 void BuildCollisionDataFromObjModel(ObjModel *model, glm::mat4 model_matrix); // Constrói dados de colisão para o cenário
 void ComputeObjBounds(ObjModel *model, glm::vec4 &bbox_min, glm::vec4 &bbox_max);
-glm::vec4 ComputeCameraPositionWithCollision(const glm::vec4 &lookat_position, const glm::vec4 &desired_camera_position);
+bool FindCameraObstructionDistance(const glm::vec4 &pivot_position, const glm::vec4 &desired_camera_position, float &hit_distance);
 
 // Declaração de funções auxiliares para renderizar texto dentro da janela
 // OpenGL. Estas funções estão definidas no arquivo "textrendering.cpp".
@@ -236,7 +236,7 @@ float g_CameraDistance = 14.0f; // Distância da câmera para a origem
 
 // Variáveis que controlam a
 bool g_FirstPersonCamera = false;
-glm::vec4 g_PositionCameraFirstPerson = glm::vec4(-.0f, .4f, .26f, 0.0f);
+glm::vec4 g_PositionCameraFirstPerson = glm::vec4(0.0f, 0.0f, 0.08f, 0.0f);
 
 // Variáveis que controlam a câmera third-person estilo Zelda-like:
 bool g_ThirdPersonCamera = true;
@@ -244,11 +244,14 @@ float g_ThirdPersonCameraDistance = 3.2f;
 float g_ThirdPersonCameraHeight = 1.4f;
 float g_ThirdPersonLookAtHeight = 0.4f;
 glm::vec4 g_CameraCollisionHalfExtents(0.16f, 0.16f, 0.16f, 0.0f);
+constexpr float CAMERA_WALL_PADDING = 0.15f;
+constexpr float CAMERA_IN_SPEED = 20.0f;
+constexpr float CAMERA_OUT_SPEED = 6.0f;
+constexpr float CAMERA_MIN_DISTANCE = 0.5f;
 float g_CameraYaw = 0.0f;
-glm::vec4 g_CameraSmoothedPosition(0.0f, 0.0f, 0.0f, 1.0f);
+float g_CurrentThirdPersonCameraDistance = g_ThirdPersonCameraDistance;
 bool g_CameraInitialized = false;
 float g_CameraYawFollowSpeed = 4.0f;
-float g_CameraPositionFollowSpeed = 8.0f;
 
 // Variáveis que controlam rotação do antebraço
 float g_ForearmAngleZ = 0.0f;
@@ -653,12 +656,6 @@ float SmoothFollowAngle(float current, float target, float speed, float dt)
     return WrapAnglePi(current + delta * alpha);
 }
 
-static glm::vec4 SmoothFollowVec4(const glm::vec4 &current, const glm::vec4 &target, float speed, float dt)
-{
-    const float alpha = 1.0f - std::exp(-speed * dt);
-    return current + (target - current) * alpha;
-}
-
 static glm::vec4 EvaluateBezierCurve(
     const glm::vec4 &p0,
     const glm::vec4 &p1,
@@ -679,9 +676,18 @@ static float Clamp01(float value)
     return std::max(0.0f, std::min(1.0f, value));
 }
 
+static float SmoothApproach(float current, float target, float speed, float dt)
+{
+    const float alpha = 1.0f - std::exp(-speed * dt);
+    return current + (target - current) * alpha;
+}
+
 static glm::vec4 ComputeFirstPersonCameraOffset()
 {
-    return Matrix_Rotate_Y(-g_PlayerYaw) * g_PositionCameraFirstPerson;
+    const float eye_height = std::max(0.4f, g_PlayerCubeHalfExtents.y * 0.82f);
+    glm::vec4 local_eye_offset = g_PositionCameraFirstPerson;
+    local_eye_offset.y = eye_height;
+    return Matrix_Rotate_Y(-g_PlayerYaw) * local_eye_offset;
 }
 
 static float GetSlingshotPullAmount()
@@ -1763,21 +1769,37 @@ int main()
             const glm::vec4 desired_camera_world =
                 g_PlayerCubePosition + camera_back * g_ThirdPersonCameraDistance + glm::vec4(0.0f, g_ThirdPersonCameraHeight, 0.0f, 0.0f);
 
+            const glm::vec4 camera_path = desired_camera_world - camera_lookat_world;
+            const float ideal_camera_distance = norm(camera_path);
+
             if (!g_CameraInitialized)
             {
-                g_CameraSmoothedPosition = desired_camera_world;
+                g_CurrentThirdPersonCameraDistance = ideal_camera_distance;
                 g_CameraInitialized = true;
             }
 
-            g_CameraSmoothedPosition = SmoothFollowVec4(
-                g_CameraSmoothedPosition,
-                desired_camera_world,
-                g_CameraPositionFollowSpeed,
+            float target_camera_distance = ideal_camera_distance;
+            float obstruction_distance = ideal_camera_distance;
+            if (FindCameraObstructionDistance(camera_lookat_world, desired_camera_world, obstruction_distance))
+            {
+                target_camera_distance = std::max(CAMERA_MIN_DISTANCE, obstruction_distance - CAMERA_WALL_PADDING);
+            }
+
+            const float camera_follow_speed =
+                (target_camera_distance < g_CurrentThirdPersonCameraDistance)
+                    ? CAMERA_IN_SPEED
+                    : CAMERA_OUT_SPEED;
+            g_CurrentThirdPersonCameraDistance = SmoothApproach(
+                g_CurrentThirdPersonCameraDistance,
+                target_camera_distance,
+                camera_follow_speed,
                 delta_time);
+            g_CurrentThirdPersonCameraDistance = std::max(CAMERA_MIN_DISTANCE, std::min(ideal_camera_distance, g_CurrentThirdPersonCameraDistance));
 
             const glm::vec4 camera_position_world =
-                ComputeCameraPositionWithCollision(camera_lookat_world, g_CameraSmoothedPosition);
-            g_CameraSmoothedPosition = camera_position_world;
+                (ideal_camera_distance > 0.0001f)
+                    ? camera_lookat_world + (camera_path / ideal_camera_distance) * g_CurrentThirdPersonCameraDistance
+                    : desired_camera_world;
             // Abaixo definimos as varáveis que efetivamente definem a câmera virtual.
             camera_position_c = glm::vec4(camera_position_world.x, camera_position_world.y, camera_position_world.z, 1.0f); // Ponto "c", centro da câmera// Ponto "c", centro da câmera
             camera_lookat_l = glm::vec4(camera_lookat_world.x, camera_lookat_world.y, camera_lookat_world.z, 1.0f);         // Ponto "l", para onde a câmera (look-at) estará olhando
@@ -1869,19 +1891,21 @@ int main()
         glCullFace(GL_BACK);
         glFrontFace(GL_CCW);
 
-        // Desenhamos o modelo visual do personagem principal.
-
-        glDisable(GL_CULL_FACE);
-
-        model = Matrix_Translate(g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z) * Matrix_Rotate_Y(-g_PlayerYaw) * Matrix_Scale(player_model_scale, player_model_scale, player_model_scale) * Matrix_Translate(-player_model_center.x, -player_model_center.y, -player_model_center.z);
-
-        glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
-        glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
-        glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
-        glUniform3f(g_object_tint_uniform, 1.0f, 1.0f, 1.0f);
-        for (size_t i = 0; i < player_model_object_names.size(); ++i)
+        // Desenhamos o modelo visual do personagem principal apenas em terceira pessoa.
+        if (!g_FirstPersonCamera)
         {
-            DrawVirtualObject(player_model_object_names[i].c_str());
+            glDisable(GL_CULL_FACE);
+
+            model = Matrix_Translate(g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z) * Matrix_Rotate_Y(-g_PlayerYaw) * Matrix_Scale(player_model_scale, player_model_scale, player_model_scale) * Matrix_Translate(-player_model_center.x, -player_model_center.y, -player_model_center.z);
+
+            glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+            glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
+            glUniform1i(g_cube_colliding_uniform, g_PlayerCubeColliding ? 1 : 0);
+            glUniform3f(g_object_tint_uniform, 1.0f, 1.0f, 1.0f);
+            for (size_t i = 0; i < player_model_object_names.size(); ++i)
+            {
+                DrawVirtualObject(player_model_object_names[i].c_str());
+            }
         }
 
         EnemyDrawContext enemy_draw_context;
@@ -2705,49 +2729,38 @@ void BuildCollisionDataFromObjModel(ObjModel *model, glm::mat4 model_matrix)
     }
 }
 
-glm::vec4 ComputeCameraPositionWithCollision(const glm::vec4 &lookat_position, const glm::vec4 &desired_camera_position)
+bool FindCameraObstructionDistance(const glm::vec4 &pivot_position, const glm::vec4 &desired_camera_position, float &hit_distance)
 {
-    glm::vec4 direction = desired_camera_position - lookat_position;
-    float max_t = norm(direction);
-    if (max_t < 0.0001f)
-        return desired_camera_position;
+    const glm::vec4 camera_path = desired_camera_position - pivot_position;
+    const float max_distance = norm(camera_path);
+    hit_distance = max_distance;
 
-    glm::vec4 direction_normalized = direction / max_t;
-    CollisionRay ray = {lookat_position, direction_normalized};
+    if (max_distance < 0.0001f)
+        return false;
 
-    float closest_t = max_t;
-    bool hit = false;
+    const glm::vec4 direction = camera_path / max_distance;
+    const float sample_spacing = std::max(0.04f, g_CameraCollisionHalfExtents.x * 0.5f);
+    const int sample_count = std::max(1, static_cast<int>(std::ceil(max_distance / sample_spacing)));
 
-    for (size_t shape_index = 0; shape_index < g_ScenarioCollisionShapes.size(); ++shape_index)
+    float last_valid_distance = 0.0f;
+    for (int sample_index = 1; sample_index <= sample_count; ++sample_index)
     {
-        const CollisionShape &shape = g_ScenarioCollisionShapes[shape_index];
-        CollisionAABB aabb = {shape.bbox_min, shape.bbox_max};
-        float t_aabb;
+        const float distance = std::min(max_distance, (max_distance * sample_index) / static_cast<float>(sample_count));
+        const glm::vec4 sample_center = pivot_position + direction * distance;
+        const CollisionShapeType collision =
+            CollidesWithScenarioAabb(sample_center, g_CameraCollisionHalfExtents, g_ScenarioCollisionShapes);
 
-        // Broad phase: Ray vs AABB
-        if (RayAabbIntersect(ray, aabb, t_aabb) && t_aabb <= closest_t)
+        if (collision == CollisionShapeType::SOLID || collision == CollisionShapeType::DOOR)
         {
-            // Narrow phase: Ray vs Triangle
-            for (size_t triangle_index = 0; triangle_index < shape.triangles.size(); ++triangle_index)
-            {
-                const Triangle &tri = shape.triangles[triangle_index];
-                CollisionTriangle col_tri = {tri.v1, tri.v2, tri.v3};
-                float t_tri;
-                if (RayTriangleIntersect(ray, col_tri, t_tri) && t_tri < closest_t)
-                {
-                    closest_t = t_tri;
-                    hit = true;
-                }
-            }
+            hit_distance = last_valid_distance;
+            return true;
         }
+
+        last_valid_distance = distance;
     }
 
-    if (hit)
-    {
-        return lookat_position + direction_normalized * std::max(0.0f, closest_t - 0.1f);
-    }
-
-    return desired_camera_position;
+    hit_distance = max_distance;
+    return false;
 }
 
 // Carrega um Vertex Shader de um arquivo GLSL. Veja definição de LoadShader() abaixo.
@@ -3025,8 +3038,8 @@ void CursorPosCallback(GLFWwindow *window, double xpos, double ypos)
             g_PlayerYaw = g_CameraTheta + max_angle;
         }
 
-        float phimax = glm::pi<float>() / 2.0f - 0.01f;
-        float phimin = -phimax;
+        const float phimax = 1.45f;
+        const float phimin = -1.45f;
 
         if (g_CameraPhi > phimax)
             g_CameraPhi = phimax;
@@ -3079,6 +3092,8 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
     {
         g_FirstPersonCamera = !g_FirstPersonCamera;
         g_ThirdPersonCamera = !g_ThirdPersonCamera;
+        g_CameraInitialized = false;
+        g_CurrentThirdPersonCameraDistance = g_ThirdPersonCameraDistance;
 
         if (g_FirstPersonCamera)
         {
@@ -3086,6 +3101,8 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
             g_APressed = false;
             g_SPressed = false;
             g_DPressed = false;
+            g_CameraTheta = g_PlayerYaw;
+            g_CameraPhi = 0.0f;
             camera_view_vector = glm::vec4(-std::sin(g_PlayerYaw), 0.0f, std::cos(g_PlayerYaw), 0.0f);
         }
         else
