@@ -39,6 +39,7 @@
 #include "movement.h"
 
 GLuint LoadTextureImage(const char *filename); // Função que carrega imagens de textura
+void SplitShapesByMaterial(std::vector<tinyobj::shape_t> *shapes);
 
 // Estrutura que representa um modelo geométrico carregado a partir de um
 // arquivo ".obj".
@@ -80,6 +81,8 @@ struct ObjModel
         if (!ret)
             throw std::runtime_error("Erro ao carregar modelo.");
 
+        SplitShapesByMaterial(&shapes);
+
         for (size_t shape = 0; shape < shapes.size(); ++shape)
         {
             if (shapes[shape].name.empty())
@@ -102,11 +105,16 @@ struct ObjModel
             {
                 std::string textpath = std::string(basepath) + materials[i].diffuse_texname;
                 GLuint texture_id = LoadTextureImage(textpath.c_str());
+                printf("[ModelLoad] material='%s' diffuse='%s' texture_id=%u\n",
+                       materials[i].name.c_str(),
+                       textpath.c_str(),
+                       texture_id);
                 material_texture_ids.push_back(texture_id);
             }
             else
             {
-                printf("Sem textura\n");
+                printf("[ModelLoad] material='%s' diffuse='' texture_id=0\n",
+                       materials[i].name.c_str());
                 material_texture_ids.push_back(0);
             }
         }
@@ -369,6 +377,74 @@ static RenderModelInfo BuildRenderModelInfo(ObjModel &model, float desired_max_d
 glm::mat4 GetScenarioModelMatrix()
 {
     return g_ScenarioModelMatrix;
+}
+
+void SplitShapesByMaterial(std::vector<tinyobj::shape_t> *shapes)
+{
+    std::vector<tinyobj::shape_t> split_shapes;
+    split_shapes.reserve(shapes->size());
+
+    for (const tinyobj::shape_t &shape : *shapes)
+    {
+        const tinyobj::mesh_t &mesh = shape.mesh;
+        const size_t face_count = mesh.num_face_vertices.size();
+
+        if (face_count == 0 || mesh.material_ids.empty())
+        {
+            split_shapes.push_back(shape);
+            continue;
+        }
+
+        size_t face_begin = 0;
+        size_t index_begin = 0;
+        int block_index = 0;
+
+        while (face_begin < face_count)
+        {
+            const int material_id = mesh.material_ids[face_begin];
+            size_t face_end = face_begin;
+            size_t index_end = index_begin;
+
+            while (face_end < face_count && mesh.material_ids[face_end] == material_id)
+            {
+                index_end += mesh.num_face_vertices[face_end];
+                ++face_end;
+            }
+
+            tinyobj::shape_t split_shape;
+            split_shape.name = shape.name;
+            if (face_begin != 0 || face_end != face_count)
+                split_shape.name += "#mat" + std::to_string(material_id) + "_" + std::to_string(block_index);
+
+            split_shape.mesh.indices.insert(
+                split_shape.mesh.indices.end(),
+                mesh.indices.begin() + static_cast<std::ptrdiff_t>(index_begin),
+                mesh.indices.begin() + static_cast<std::ptrdiff_t>(index_end));
+            split_shape.mesh.num_face_vertices.insert(
+                split_shape.mesh.num_face_vertices.end(),
+                mesh.num_face_vertices.begin() + static_cast<std::ptrdiff_t>(face_begin),
+                mesh.num_face_vertices.begin() + static_cast<std::ptrdiff_t>(face_end));
+            split_shape.mesh.material_ids.insert(
+                split_shape.mesh.material_ids.end(),
+                mesh.material_ids.begin() + static_cast<std::ptrdiff_t>(face_begin),
+                mesh.material_ids.begin() + static_cast<std::ptrdiff_t>(face_end));
+
+            if (!mesh.smoothing_group_ids.empty())
+            {
+                split_shape.mesh.smoothing_group_ids.insert(
+                    split_shape.mesh.smoothing_group_ids.end(),
+                    mesh.smoothing_group_ids.begin() + static_cast<std::ptrdiff_t>(face_begin),
+                    mesh.smoothing_group_ids.begin() + static_cast<std::ptrdiff_t>(face_end));
+            }
+
+            split_shapes.push_back(std::move(split_shape));
+            face_begin = face_end;
+            index_begin = index_end;
+            ++block_index;
+        }
+    }
+
+    *shapes = std::move(split_shapes);
 }
 
 // Debug drawing: build a unit wireframe cube centered at origin
@@ -2246,6 +2322,7 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel *model)
     {
         size_t first_index = indices.size();
         size_t num_triangles = model->shapes[shape].mesh.num_face_vertices.size();
+        size_t uv_vertex_count = 0;
 
         const float minval = std::numeric_limits<float>::min();
         const float maxval = std::numeric_limits<float>::max();
@@ -2294,6 +2371,13 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel *model)
                     normal_coefficients.push_back(nz);   // Z
                     normal_coefficients.push_back(0.0f); // W
                 }
+                else
+                {
+                    normal_coefficients.push_back(0.0f);
+                    normal_coefficients.push_back(0.0f);
+                    normal_coefficients.push_back(0.0f);
+                    normal_coefficients.push_back(0.0f);
+                }
 
                 if (idx.texcoord_index != -1)
                 {
@@ -2301,6 +2385,12 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel *model)
                     const float v = model->attrib.texcoords[2 * idx.texcoord_index + 1];
                     texture_coefficients.push_back(u);
                     texture_coefficients.push_back(v);
+                    ++uv_vertex_count;
+                }
+                else
+                {
+                    texture_coefficients.push_back(0.0f);
+                    texture_coefficients.push_back(0.0f);
                 }
             }
         }
@@ -2314,16 +2404,20 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel *model)
         theobject.rendering_mode = GL_TRIANGLES;              // Índices correspondem ao tipo de rasterização GL_TRIANGLES.
         theobject.vertex_array_object_id = vertex_array_object_id;
 
-        int material_id = model->shapes[shape].mesh.material_ids[0];
-        if (material_id >= 0)
+        int material_id = -1;
+        if (!model->shapes[shape].mesh.material_ids.empty())
+            material_id = model->shapes[shape].mesh.material_ids[0];
+
+        if (material_id >= 0 && static_cast<size_t>(material_id) < model->material_texture_ids.size())
         {
             theobject.texture_id = model->material_texture_ids[material_id];
+            theobject.sampler_id = 0;
             // Encontra o sampler correspondente à textura no cache
-            for (auto const &[name, id] : g_TextureCache)
+            for (std::map<std::string, GLuint>::const_iterator it = g_TextureCache.begin(); it != g_TextureCache.end(); ++it)
             {
-                if (id == theobject.texture_id)
+                if (it->second == theobject.texture_id)
                 {
-                    theobject.sampler_id = g_SamplerCache[name];
+                    theobject.sampler_id = g_SamplerCache[it->first];
                     break;
                 }
             }
@@ -2336,6 +2430,14 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel *model)
 
         theobject.bbox_min = bbox_min;
         theobject.bbox_max = bbox_max;
+
+        printf("[MeshBuild] shape='%s' material_id=%d uv_vertices=%zu/%zu texture_id=%u sampler_id=%u\n",
+               theobject.name.c_str(),
+               material_id,
+               uv_vertex_count,
+               num_triangles * 3,
+               theobject.texture_id,
+               theobject.sampler_id);
 
         g_VirtualScene[model->shapes[shape].name] = theobject;
     }
@@ -2351,33 +2453,27 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel *model)
     glEnableVertexAttribArray(location);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    if (!normal_coefficients.empty())
-    {
-        GLuint VBO_normal_coefficients_id;
-        glGenBuffers(1, &VBO_normal_coefficients_id);
-        glBindBuffer(GL_ARRAY_BUFFER, VBO_normal_coefficients_id);
-        glBufferData(GL_ARRAY_BUFFER, normal_coefficients.size() * sizeof(float), NULL, GL_STATIC_DRAW);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, normal_coefficients.size() * sizeof(float), normal_coefficients.data());
-        location = 1;             // "(location = 1)" em "shader_vertex.glsl"
-        number_of_dimensions = 4; // vec4 em "shader_vertex.glsl"
-        glVertexAttribPointer(location, number_of_dimensions, GL_FLOAT, GL_FALSE, 0, 0);
-        glEnableVertexAttribArray(location);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-    }
+    GLuint VBO_normal_coefficients_id;
+    glGenBuffers(1, &VBO_normal_coefficients_id);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_normal_coefficients_id);
+    glBufferData(GL_ARRAY_BUFFER, normal_coefficients.size() * sizeof(float), NULL, GL_STATIC_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, normal_coefficients.size() * sizeof(float), normal_coefficients.data());
+    location = 1;             // "(location = 1)" em "shader_vertex.glsl"
+    number_of_dimensions = 4; // vec4 em "shader_vertex.glsl"
+    glVertexAttribPointer(location, number_of_dimensions, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(location);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    if (!texture_coefficients.empty())
-    {
-        GLuint VBO_texture_coefficients_id;
-        glGenBuffers(1, &VBO_texture_coefficients_id);
-        glBindBuffer(GL_ARRAY_BUFFER, VBO_texture_coefficients_id);
-        glBufferData(GL_ARRAY_BUFFER, texture_coefficients.size() * sizeof(float), NULL, GL_STATIC_DRAW);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, texture_coefficients.size() * sizeof(float), texture_coefficients.data());
-        location = 2;             // "(location = 1)" em "shader_vertex.glsl"
-        number_of_dimensions = 2; // vec2 em "shader_vertex.glsl"
-        glVertexAttribPointer(location, number_of_dimensions, GL_FLOAT, GL_FALSE, 0, 0);
-        glEnableVertexAttribArray(location);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-    }
+    GLuint VBO_texture_coefficients_id;
+    glGenBuffers(1, &VBO_texture_coefficients_id);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO_texture_coefficients_id);
+    glBufferData(GL_ARRAY_BUFFER, texture_coefficients.size() * sizeof(float), NULL, GL_STATIC_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, texture_coefficients.size() * sizeof(float), texture_coefficients.data());
+    location = 2;             // "(location = 1)" em "shader_vertex.glsl"
+    number_of_dimensions = 2; // vec2 em "shader_vertex.glsl"
+    glVertexAttribPointer(location, number_of_dimensions, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(location);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     GLuint indices_id;
     glGenBuffers(1, &indices_id);
