@@ -1,6 +1,5 @@
 # Blender 5.1.1
 # www.blender.org
-mtllib collision.mtl
 o GROUND_1
 v -3.728466 0.000000 6.436042
 v -5.392959 0.000001 4.749355

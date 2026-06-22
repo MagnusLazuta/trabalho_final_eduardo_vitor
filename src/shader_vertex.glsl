@@ -17,6 +17,8 @@ uniform mat4 model_normal_matrix;
 const int MAX_BONES = 100;
 uniform mat4 bones[MAX_BONES];
 uniform int useAnimation;
+uniform vec3 weaponOffset;  // Offset adicional para armas (bone-skinned)
+uniform int isWeapon;       // 1 se é uma arma, 0 caso contrário
 
 // Atributos de vértice que serão gerados como saída ("out") pelo Vertex Shader.
 out vec4 position_world;
@@ -34,16 +36,24 @@ void main()
         float totalWeight = weights[0] + weights[1] + weights[2] + weights[3];
         
         if (totalWeight > 0.001) {
-            mat4 boneTransform = mat4(0.0);
-            boneTransform += bones[boneIDs[0]] * weights[0];
-            boneTransform += bones[boneIDs[1]] * weights[1];
-            boneTransform += bones[boneIDs[2]] * weights[2];
-            boneTransform += bones[boneIDs[3]] * weights[3];
-            
-            skinnedPosition = boneTransform * model_coefficients;
-            
-            mat3 normalMatrix = transpose(inverse(mat3(boneTransform)));
-            skinnedNormal = vec4(normalMatrix * normal_coefficients.xyz, 0.0);
+            if (isWeapon == 1) {
+                // Para armas: vértices já estão em model space na posição do osso.
+                // Não aplicamos boneTransform (ele expecta bind pose space).
+                // Aplicamos offset adicional para posicionamento manual.
+                skinnedPosition = model_coefficients + vec4(weaponOffset, 0.0);
+                // Offset é aplicado depois via model matrix (weaponOffset na C++)
+            } else {
+                mat4 boneTransform = mat4(0.0);
+                boneTransform += bones[boneIDs[0]] * weights[0];
+                boneTransform += bones[boneIDs[1]] * weights[1];
+                boneTransform += bones[boneIDs[2]] * weights[2];
+                boneTransform += bones[boneIDs[3]] * weights[3];
+                
+                skinnedPosition = boneTransform * model_coefficients;
+                
+                mat3 normalMatrix = transpose(inverse(mat3(boneTransform)));
+                skinnedNormal = vec4(normalMatrix * normal_coefficients.xyz, 0.0);
+            }
         }
         // Se totalWeight == 0, mantém posição original (sem deformação)
     }

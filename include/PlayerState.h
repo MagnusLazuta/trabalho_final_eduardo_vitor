@@ -34,6 +34,9 @@ public:
     float GetWalkSpeed() const { return m_walkSpeed; }
     float GetRunSpeed()  const { return m_runSpeed; }
 
+    void SetAttackVariant(int variant) { m_attackVariant = variant; }
+    int GetAttackVariant() const { return m_attackVariant; }
+
 private:
     PlayerState m_currentState;
     PlayerState m_previousState;
@@ -45,6 +48,7 @@ private:
     float m_walkSpeed = 3.5f;
     float m_runSpeed  = 6.0f;
     float m_runSpeedMultiplier = 1.8f;
+    int   m_attackVariant = 0;
 
     static constexpr float ATTACK_DURATION = 1.0f;
     static constexpr float DEFEND_DURATION = 1.0f;

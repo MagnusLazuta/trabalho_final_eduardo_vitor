@@ -132,7 +132,26 @@ void PopMatrix(glm::mat4 &M);
 // Declaração de várias funções utilizadas em main().  Essas estão definidas
 // logo após a definição de main() neste arquivo.
 void BuildTrianglesAndAddToVirtualScene(ObjModel *, GLuint default_texture_id = 0); // Constrói representação de um ObjModel como malha de triângulos para renderização
-void BuildTrianglesFromAssimpAndAddToVirtualScene(AssimpModelLoader &loader); // Constrói representação de um modelo Assimp como malha de triângulos para renderização
+struct WeaponMeshData {
+    std::string name;
+    std::vector<float> vertices;   // x,y,z per vertex
+    std::vector<float> normals;    // x,y,z per vertex
+    std::vector<float> texcoords;  // u,v per vertex
+    std::vector<unsigned int> indices;
+    int boneIndex;                 // bone index in the skeleton (RightHand or LeftHand)
+    glm::vec3 gripOffset;          // offset from model center to grip point in OBJ space
+};
+
+WeaponMeshData BuildWeaponMeshData(
+    ObjModel &objModel,
+    const std::string &name,
+    int boneIndex,
+    const glm::vec3 &centerToGripOffset,
+    const glm::vec3 &modelCenter,
+    const glm::vec3 &boneInitialModelPos);
+
+void BuildTrianglesFromAssimpAndAddToVirtualScene(AssimpModelLoader &loader,
+    const std::vector<WeaponMeshData> &extraMeshes = std::vector<WeaponMeshData>());
 void ComputeNormals(ObjModel *model);                                         // Computa normais de um ObjModel, caso não existam.
 void LoadShadersFromFiles();                                                  // Carrega os shaders de vértice e fragmento, criando um programa de GPU
 void DrawVirtualObject(const char *object_name);                              // Desenha um objeto armazenado em g_VirtualScene
@@ -308,6 +327,18 @@ GLint g_material_diffuse_uniform;
 GLint g_material_specular_uniform;
 GLint g_material_ambient_uniform;
 GLint g_material_shininess_uniform;
+GLint g_weapon_offset_uniform;
+GLint g_is_weapon_uniform;
+
+// Offsets de posicionamento e rotação das armas (valores fixos)
+glm::vec3 g_SwordPositionOffset(-50.0f, -72.0f, 0.0f);
+glm::vec3 g_SwordRotationDeg(300.0f, 345.0f, 105.0f);
+glm::vec3 g_ShieldPositionOffset(46.0f, -76.0f, 0.0f);
+glm::vec3 g_ShieldRotationDeg(345.0f, 285.0f, 240.0f);
+
+// Variantes de ataque
+int g_CurrentAttackVariant = 6; // slash (3)
+std::vector<std::string> g_AttackVariantNames;
 
 // Número de texturas carregadas pela função LoadTextureImage()
 GLuint g_NumLoadedTextures = 0;
@@ -330,6 +361,18 @@ std::vector<glm::mat4> g_PlayerAnimationTransforms;
 GLuint g_PlayerTextureID = 0;
 bool g_HasPlayerTexture = false;
 std::vector<GLuint> g_PlayerMeshTextureIDs; // Textura por mesh do jogador
+
+// Modelos de armas (espada e escudo)
+ObjModel *g_SwordModel = nullptr;
+ObjModel *g_ShieldModel = nullptr;
+std::vector<std::string> g_SwordObjectNames;
+std::vector<std::string> g_ShieldObjectNames;
+glm::vec4 g_SwordModelCenter(0.0f);
+glm::vec4 g_ShieldModelCenter(0.0f);
+glm::vec3 g_SwordGripOffset(0.0f); // Offset do punho relativo ao centro
+glm::vec3 g_ShieldGripOffset(0.0f); // Offset do grip relativo ao centro
+float g_SwordModelScale = 1.0f;
+float g_ShieldModelScale = 1.0f;
 
 // Animações
 
@@ -1755,7 +1798,7 @@ int main()
             }
         }
 
-        printf("  AABB: [%.1f,%.1f,%.1f] a [%.1f,%.1f,%.1f]\n",
+        printf("  Visual AABB: [%.1f,%.1f,%.1f] a [%.1f,%.1f,%.1f]\n",
                part.bbox_min.x, part.bbox_min.y, part.bbox_min.z,
                part.bbox_max.x, part.bbox_max.y, part.bbox_max.z);
 
@@ -1766,8 +1809,20 @@ int main()
             glm::vec4 col_bbox_min, col_bbox_max;
             BuildCollisionDataIntoVector(&col_model, Matrix_Identity(),
                 part.collision_shapes, col_bbox_min, col_bbox_max);
+
+            // USA AABB da colisao para deteccao de cenas (collision.obj pode estar
+            // em posicao diferente do map.obj). Faz union com AABB do mapa.
+            part.bbox_min.x = std::min(part.bbox_min.x, col_bbox_min.x);
+            part.bbox_min.y = std::min(part.bbox_min.y, col_bbox_min.y);
+            part.bbox_min.z = std::min(part.bbox_min.z, col_bbox_min.z);
+            part.bbox_max.x = std::max(part.bbox_max.x, col_bbox_max.x);
+            part.bbox_max.y = std::max(part.bbox_max.y, col_bbox_max.y);
+            part.bbox_max.z = std::max(part.bbox_max.z, col_bbox_max.z);
         }
 
+        printf("  AABB (union): [%.1f,%.1f,%.1f] a [%.1f,%.1f,%.1f]\n",
+               part.bbox_min.x, part.bbox_min.y, part.bbox_min.z,
+               part.bbox_max.x, part.bbox_max.y, part.bbox_max.z);
         printf("  Shapes de colisao: %zu, objetos visuais: %zu\n",
                part.collision_shapes.size(), part.render_object_names.size());
 
@@ -1916,9 +1971,77 @@ int main()
     if (!g_PlayerModelLoader.AddAnimation(jumpAnimPath)) {
         printf("WARNING: Could not load jump animation from %s\n", jumpAnimPath.c_str());
     }
+
+    // Carrega variantes de ataque
+    struct AttackVariant { const char *label; const char *path; };
+    std::vector<AttackVariant> attackVariants = {
+        {"attack",       "../../Sword and Shield Pack/sword and shield attack.fbx"},
+        {"attack (2)",   "../../Sword and Shield Pack/sword and shield attack (2).fbx"},
+        {"attack (3)",   "../../Sword and Shield Pack/sword and shield attack (3).fbx"},
+        {"attack (4)",   "../../Sword and Shield Pack/sword and shield attack (4).fbx"},
+        {"slash",        "../../Sword and Shield Pack/sword and shield slash.fbx"},
+        {"slash (2)",    "../../Sword and Shield Pack/sword and shield slash (2).fbx"},
+        {"slash (3)",    "../../Sword and Shield Pack/sword and shield slash (3).fbx"},
+        {"slash (4)",    "../../Sword and Shield Pack/sword and shield slash (4).fbx"},
+        {"slash (5)",    "../../Sword and Shield Pack/sword and shield slash (5).fbx"},
+        {"kick",         "../../Sword and Shield Pack/sword and shield kick.fbx"},
+    };
+    for (const auto &v : attackVariants)
+    {
+        std::string path = ResolveScene00Path(v.path, v.path);
+        if (g_PlayerModelLoader.AddAnimation(path)) {
+            g_AttackVariantNames.push_back(v.label);
+            printf("  Attack variant loaded: '%s'\n", v.label);
+        } else {
+            printf("  WARNING: Could not load attack variant '%s'\n", v.label);
+        }
+    }
+    printf("Total attack variants: %zu\n", g_AttackVariantNames.size());
+    for (size_t i = 0; i < g_AttackVariantNames.size(); ++i)
+        printf("    [%zu] %s\n", i, g_AttackVariantNames[i].c_str());
+
+    g_PlayerStateMachine.SetAttackVariant(g_CurrentAttackVariant);
     
     printf("Total animations loaded: %zu\n", g_PlayerModelLoader.GetAnimations().size());
     
+    BuildTrianglesFromAssimpAndAddToVirtualScene(g_PlayerModelLoader);
+    
+    // Carrega armas como objetos separados (fora do VAO do player)
+    const std::string sword_model_path = ResolveScene00Path("../../assets/char/espada.obj", "assets/char/espada.obj");
+    ObjModel sword_model(sword_model_path.c_str());
+    ComputeNormals(&sword_model);
+    BuildTrianglesAndAddToVirtualScene(&sword_model, g_DefaultGrayTextureID);
+    glm::vec4 sword_model_bbox_min, sword_model_bbox_max;
+    ComputeObjBounds(&sword_model, sword_model_bbox_min, sword_model_bbox_max);
+    g_SwordModelCenter = (sword_model_bbox_min + sword_model_bbox_max) * 0.5f;
+    glm::vec4 sword_model_size = sword_model_bbox_max - sword_model_bbox_min;
+    float sword_max_dim = std::max(sword_model_size.x, std::max(sword_model_size.y, sword_model_size.z));
+    g_SwordModelScale = (sword_max_dim > 1e-6f) ? (1.0f / sword_max_dim) : 1.0f;
+    for (auto &[name, obj] : g_VirtualScene)
+    {
+        if (name.find("nodes_28_") == 0 || name.find("nodes_30_") == 0)
+            g_SwordObjectNames.push_back(name);
+    }
+    printf("Sword loaded: %zu objects, scale=%.4f\n", g_SwordObjectNames.size(), g_SwordModelScale);
+    for (const auto &n : g_SwordObjectNames) printf("  sword obj: '%s'\n", n.c_str());
+
+    const std::string shield_model_path = ResolveScene00Path("../../assets/char/shield.obj", "assets/char/shield.obj");
+    ObjModel shield_model(shield_model_path.c_str());
+    ComputeNormals(&shield_model);
+    BuildTrianglesAndAddToVirtualScene(&shield_model, g_DefaultGrayTextureID);
+    glm::vec4 shield_model_bbox_min, shield_model_bbox_max;
+    ComputeObjBounds(&shield_model, shield_model_bbox_min, shield_model_bbox_max);
+    g_ShieldModelCenter = (shield_model_bbox_min + shield_model_bbox_max) * 0.5f;
+    glm::vec4 shield_model_size = shield_model_bbox_max - shield_model_bbox_min;
+    float shield_max_dim = std::max(shield_model_size.x, std::max(shield_model_size.y, shield_model_size.z));
+    g_ShieldModelScale = (shield_max_dim > 1e-6f) ? (1.0f / shield_max_dim) : 1.0f;
+    for (auto &[name, obj] : g_VirtualScene)
+    {
+        if (name.find("nodes_33_") == 0)
+            g_ShieldObjectNames.push_back(name);
+    }
+    printf("Shield loaded: %zu objects, scale=%.4f\n", g_ShieldObjectNames.size(), g_ShieldModelScale);
+
     BuildTrianglesFromAssimpAndAddToVirtualScene(g_PlayerModelLoader);
     
     // Calcula o AABB do modelo do personagem
@@ -2186,25 +2309,45 @@ int main()
 
             if (current_scene >= g_SceneParts.size())
             {
-                // Player fora de todas as cenas — fallback para scene00
-                current_scene = 0;
+                // Player fora de todas as cenas — tenta detectar por XZ apenas
+                // (ignora Y para evitar death spiral quando player cai)
+                for (size_t i = 0; i < g_SceneParts.size(); ++i)
+                {
+                    const ScenePart &part = g_SceneParts[i];
+                    if (g_PlayerCubePosition.x >= part.bbox_min.x &&
+                        g_PlayerCubePosition.x <= part.bbox_max.x &&
+                        g_PlayerCubePosition.z >= part.bbox_min.z &&
+                        g_PlayerCubePosition.z <= part.bbox_max.z)
+                    {
+                        current_scene = i;
+                        break;
+                    }
+                }
             }
 
-            std::vector<size_t> new_active;
-            new_active.push_back(current_scene);
-            for (size_t adj : g_SceneParts[current_scene].adjacent_indices)
-                new_active.push_back(adj);
-            std::sort(new_active.begin(), new_active.end());
-            new_active.erase(std::unique(new_active.begin(), new_active.end()), new_active.end());
-
-            if (new_active != g_CurrentActiveSceneIndices)
+            if (current_scene >= g_SceneParts.size())
             {
-                g_CurrentActiveSceneIndices = new_active;
-                g_ScenarioCollisionShapes.clear();
-                for (size_t idx : g_CurrentActiveSceneIndices)
+                // Player completamente fora — mantém cenas anteriores
+                // (não muda g_ScenarioCollisionShapes, evita death spiral)
+            }
+            else
+            {
+                std::vector<size_t> new_active;
+                new_active.push_back(current_scene);
+                for (size_t adj : g_SceneParts[current_scene].adjacent_indices)
+                    new_active.push_back(adj);
+                std::sort(new_active.begin(), new_active.end());
+                new_active.erase(std::unique(new_active.begin(), new_active.end()), new_active.end());
+
+                if (new_active != g_CurrentActiveSceneIndices)
                 {
-                    for (auto &cs : g_SceneParts[idx].collision_shapes)
-                        g_ScenarioCollisionShapes.push_back(cs);
+                    g_CurrentActiveSceneIndices = new_active;
+                    g_ScenarioCollisionShapes.clear();
+                    for (size_t idx : g_CurrentActiveSceneIndices)
+                    {
+                        for (auto &cs : g_SceneParts[idx].collision_shapes)
+                            g_ScenarioCollisionShapes.push_back(cs);
+                    }
                 }
             }
         }
@@ -2560,6 +2703,85 @@ int main()
                 }
                 DrawVirtualObject(player_model_object_names[i].c_str());
             }
+
+            // Desenha armas posicionadas nos ossos da mão
+            if (g_PlayerModelLoader.GetNumBones() > 0)
+            {
+                glUniform1i(g_use_animation_uniform, 0);
+                glUniform1i(g_has_player_texture_uniform, 0);
+
+                glActiveTexture(GL_TEXTURE3);
+                glBindTexture(GL_TEXTURE_2D, g_DefaultGrayTextureID);
+
+                glm::mat4 rightHandTransform = g_PlayerModelLoader.GetBoneWorldTransform("mixamorig:RightHand");
+                glm::mat4 leftHandTransform = g_PlayerModelLoader.GetBoneWorldTransform("mixamorig:LeftHand");
+
+                glm::vec3 rhModelPos(rightHandTransform[3].x, rightHandTransform[3].y, rightHandTransform[3].z);
+                glm::vec3 lhModelPos(leftHandTransform[3].x, leftHandTransform[3].y, leftHandTransform[3].z);
+
+                // Espada na mão direita
+                if (!g_SwordObjectNames.empty())
+                {
+                    glm::mat4 swordModel = Matrix_Translate(visualPos.x, visualPos.y, visualPos.z)
+                        * Matrix_Rotate_Y(-g_PlayerYaw)
+                        * Matrix_Scale(player_model_scale, player_model_scale, player_model_scale)
+                        * Matrix_Translate(rhModelPos.x - player_model_center.x,
+                                           rhModelPos.y - player_model_center.y,
+                                           rhModelPos.z - player_model_center.z)
+                        * Matrix_Rotate_X(g_SwordRotationDeg.x * 3.14159f / 180.0f)
+                        * Matrix_Rotate_Y(g_SwordRotationDeg.y * 3.14159f / 180.0f)
+                        * Matrix_Rotate_Z(g_SwordRotationDeg.z * 3.14159f / 180.0f)
+                        * Matrix_Translate(g_SwordPositionOffset.x, g_SwordPositionOffset.y, g_SwordPositionOffset.z);
+                    glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(swordModel));
+                    glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE, glm::value_ptr(glm::transpose(glm::inverse(swordModel))));
+                    glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
+                    glUniform1i(g_cube_colliding_uniform, 0);
+                    glUniform3f(g_object_tint_uniform, 1.0f, 1.0f, 1.0f);
+                    for (const auto &name : g_SwordObjectNames)
+                        DrawVirtualObject(name.c_str());
+                }
+
+                // Escudo na mão esquerda
+                if (!g_ShieldObjectNames.empty())
+                {
+                    glm::mat4 shieldModel = Matrix_Translate(visualPos.x, visualPos.y, visualPos.z)
+                        * Matrix_Rotate_Y(-g_PlayerYaw)
+                        * Matrix_Scale(player_model_scale, player_model_scale, player_model_scale)
+                        * Matrix_Translate(lhModelPos.x - player_model_center.x,
+                                           lhModelPos.y - player_model_center.y,
+                                           lhModelPos.z - player_model_center.z)
+                        * Matrix_Rotate_X(g_ShieldRotationDeg.x * 3.14159f / 180.0f)
+                        * Matrix_Rotate_Y(g_ShieldRotationDeg.y * 3.14159f / 180.0f)
+                        * Matrix_Rotate_Z(g_ShieldRotationDeg.z * 3.14159f / 180.0f)
+                        * Matrix_Translate(g_ShieldPositionOffset.x, g_ShieldPositionOffset.y, g_ShieldPositionOffset.z);
+                    glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(shieldModel));
+                    glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE, glm::value_ptr(glm::transpose(glm::inverse(shieldModel))));
+                    glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
+                    glUniform1i(g_cube_colliding_uniform, 0);
+                    glUniform3f(g_object_tint_uniform, 1.0f, 1.0f, 1.0f);
+                    for (const auto &name : g_ShieldObjectNames)
+                        DrawVirtualObject(name.c_str());
+                }
+
+                // Debug: imprime posições a cada 120 frames
+                if (g_AnimDebugFrameCounter % g_AnimDebugPrintInterval == 0)
+                {
+                    printf("[WEAPON] Player=(%.1f,%.1f,%.1f) Ataque='%s'\n",
+                           visualPos.x, visualPos.y, visualPos.z,
+                           g_CurrentAttackVariant < (int)g_AttackVariantNames.size() ?
+                               g_AttackVariantNames[g_CurrentAttackVariant].c_str() : "none");
+                    printf("  Sword  pos=(%.1f,%.1f,%.1f) rot=(%.0f,%.0f,%.0f)\n",
+                           g_SwordPositionOffset.x, g_SwordPositionOffset.y, g_SwordPositionOffset.z,
+                           g_SwordRotationDeg.x, g_SwordRotationDeg.y, g_SwordRotationDeg.z);
+                    printf("  Shield pos=(%.1f,%.1f,%.1f) rot=(%.0f,%.0f,%.0f)\n",
+                           g_ShieldPositionOffset.x, g_ShieldPositionOffset.y, g_ShieldPositionOffset.z,
+                           g_ShieldRotationDeg.x, g_ShieldRotationDeg.y, g_ShieldRotationDeg.z);
+                    printf("  RightHand model=(%.1f,%.1f,%.1f)\n", rhModelPos.x, rhModelPos.y, rhModelPos.z);
+                    printf("  LeftHand  model=(%.1f,%.1f,%.1f)\n", lhModelPos.x, lhModelPos.y, lhModelPos.z);
+                }
+
+                glUniform1i(g_has_player_texture_uniform, g_HasPlayerTexture ? 1 : 0);
+            }
         }
         
         // Reseta animação
@@ -2676,6 +2898,20 @@ int main()
                     vine_half.w = 0.0f;
                     glm::vec4 vine_color(1.0f, 0.0f, 1.0f, 1.0f);
                     DrawDebugAABB(vine_center, vine_half, vine_color);
+                }
+            }
+
+            // Draw SOLID hitboxes (dark green wireframe)
+            for (size_t i = 0; i < g_ScenarioCollisionShapes.size(); ++i)
+            {
+                if (g_ScenarioCollisionShapes[i].type == CollisionShapeType::SOLID)
+                {
+                    glm::vec4 solid_center = (g_ScenarioCollisionShapes[i].bbox_min + g_ScenarioCollisionShapes[i].bbox_max) * 0.5f;
+                    glm::vec4 solid_half = (g_ScenarioCollisionShapes[i].bbox_max - g_ScenarioCollisionShapes[i].bbox_min) * 0.5f;
+                    solid_center.w = 1.0f;
+                    solid_half.w = 0.0f;
+                    glm::vec4 solid_color(0.0f, 0.5f, 0.0f, 1.0f);
+                    DrawDebugAABB(solid_center, solid_half, solid_color);
                 }
             }
 
@@ -2912,6 +3148,8 @@ void LoadShadersFromFiles()
     g_material_specular_uniform = glGetUniformLocation(g_GpuProgramID, "materialSpecular");
     g_material_ambient_uniform = glGetUniformLocation(g_GpuProgramID, "materialAmbient");
     g_material_shininess_uniform = glGetUniformLocation(g_GpuProgramID, "materialShininess");
+    g_weapon_offset_uniform = glGetUniformLocation(g_GpuProgramID, "weaponOffset");
+    g_is_weapon_uniform = glGetUniformLocation(g_GpuProgramID, "isWeapon");
 
     // Variáveis em "shader_fragment.glsl" para acesso das imagens de textura
     glUseProgram(g_GpuProgramID);
@@ -3224,6 +3462,34 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel *model, GLuint default_texture_
     glEnableVertexAttribArray(location);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
+    // Dummy bone attributes (locations 3 and 4) for the vertex shader
+    {
+        size_t num_verts = model_coefficients.size() / 4;
+        std::vector<int> zero_ids(num_verts * 4, 0);
+        GLuint VBO_bone_ids;
+        glGenBuffers(1, &VBO_bone_ids);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO_bone_ids);
+        glBufferData(GL_ARRAY_BUFFER, zero_ids.size() * sizeof(int), zero_ids.data(), GL_STATIC_DRAW);
+        location = 3;
+        glVertexAttribIPointer(location, 4, GL_INT, 0, 0);
+        glEnableVertexAttribArray(location);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+        std::vector<float> zero_weights(num_verts * 4, 0.0f);
+        GLuint VBO_bone_weights;
+        glGenBuffers(1, &VBO_bone_weights);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO_bone_weights);
+        glBufferData(GL_ARRAY_BUFFER, zero_weights.size() * sizeof(float), zero_weights.data(), GL_STATIC_DRAW);
+        location = 4;
+        glVertexAttribPointer(location, 4, GL_FLOAT, GL_FALSE, 0, 0);
+        glEnableVertexAttribArray(location);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+
+    // Desabilita attributes 3 e 4 para modelos não-animados (OBJ)
+    glDisableVertexAttribArray(3);
+    glDisableVertexAttribArray(4);
+
     GLuint indices_id;
     glGenBuffers(1, &indices_id);
 
@@ -3239,7 +3505,72 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel *model, GLuint default_texture_
     glBindVertexArray(0);
 }
 
-void BuildTrianglesFromAssimpAndAddToVirtualScene(AssimpModelLoader &loader)
+WeaponMeshData BuildWeaponMeshData(
+    ObjModel &objModel,
+    const std::string &name,
+    int boneIndex,
+    const glm::vec3 &centerToGripOffset,
+    const glm::vec3 &modelCenter,
+    const glm::vec3 &boneInitialModelPos)
+{
+    WeaponMeshData data;
+    data.name = name;
+    data.boneIndex = boneIndex;
+    data.gripOffset = centerToGripOffset;
+
+    data.vertices.reserve(objModel.attrib.vertices.size());
+    for (size_t i = 0; i < objModel.attrib.vertices.size(); ++i)
+        data.vertices.push_back(objModel.attrib.vertices[i]);
+
+    data.normals.reserve(objModel.attrib.normals.size());
+    for (size_t i = 0; i < objModel.attrib.normals.size(); ++i)
+        data.normals.push_back(objModel.attrib.normals[i]);
+
+    data.texcoords.reserve(objModel.attrib.texcoords.size());
+    for (size_t i = 0; i < objModel.attrib.texcoords.size(); ++i)
+        data.texcoords.push_back(objModel.attrib.texcoords[i]);
+
+    for (const auto &shape : objModel.shapes)
+    {
+        for (const auto &idx : shape.mesh.indices)
+        {
+            data.indices.push_back(idx.vertex_index);
+        }
+    }
+
+    glm::vec3 objCenter(0.0f);
+    int vcount = (int)(objModel.attrib.vertices.size() / 3);
+    for (int i = 0; i < vcount; ++i)
+    {
+        objCenter.x += objModel.attrib.vertices[3*i+0];
+        objCenter.y += objModel.attrib.vertices[3*i+1];
+        objCenter.z += objModel.attrib.vertices[3*i+2];
+    }
+    if (vcount > 0) objCenter /= (float)vcount;
+
+    glm::vec3 gripPos = objCenter + centerToGripOffset;
+
+    glm::vec3 offset = boneInitialModelPos - gripPos;
+
+    for (size_t i = 0; i < data.vertices.size(); i += 3)
+    {
+        data.vertices[i+0] += offset.x;
+        data.vertices[i+1] += offset.y;
+        data.vertices[i+2] += offset.z;
+    }
+
+    printf("Weapon '%s': objCenter=(%.1f,%.1f,%.1f) bonePos=(%.1f,%.1f,%.1f) offset=(%.1f,%.1f,%.1f) verts=%zu\n",
+           name.c_str(),
+           objCenter.x, objCenter.y, objCenter.z,
+           boneInitialModelPos.x, boneInitialModelPos.y, boneInitialModelPos.z,
+           offset.x, offset.y, offset.z,
+           data.vertices.size()/3);
+
+    return data;
+}
+
+void BuildTrianglesFromAssimpAndAddToVirtualScene(AssimpModelLoader &loader,
+    const std::vector<WeaponMeshData> &extraMeshes)
 {
     GLuint vertex_array_object_id;
     glGenVertexArrays(1, &vertex_array_object_id);
@@ -3349,7 +3680,89 @@ void BuildTrianglesFromAssimpAndAddToVirtualScene(AssimpModelLoader &loader)
         
         g_VirtualScene[mesh.name] = theobject;
     }
-    
+
+    for (const auto &weapon : extraMeshes)
+    {
+        size_t first_index = indices.size();
+        size_t vertex_offset = model_coefficients.size() / 4;
+
+        for (size_t i = 0; i < weapon.indices.size(); ++i)
+        {
+            unsigned int idx = weapon.indices[i];
+            indices.push_back(vertex_offset + idx);
+
+            model_coefficients.push_back(weapon.vertices[3 * idx + 0]);
+            model_coefficients.push_back(weapon.vertices[3 * idx + 1]);
+            model_coefficients.push_back(weapon.vertices[3 * idx + 2]);
+            model_coefficients.push_back(1.0f);
+
+            if (!weapon.normals.empty())
+            {
+                normal_coefficients.push_back(weapon.normals[3 * idx + 0]);
+                normal_coefficients.push_back(weapon.normals[3 * idx + 1]);
+                normal_coefficients.push_back(weapon.normals[3 * idx + 2]);
+                normal_coefficients.push_back(0.0f);
+            }
+            else
+            {
+                normal_coefficients.push_back(0.0f);
+                normal_coefficients.push_back(1.0f);
+                normal_coefficients.push_back(0.0f);
+                normal_coefficients.push_back(0.0f);
+            }
+
+            if (!weapon.texcoords.empty())
+            {
+                texture_coefficients.push_back(weapon.texcoords[2 * idx + 0]);
+                texture_coefficients.push_back(weapon.texcoords[2 * idx + 1]);
+            }
+            else
+            {
+                texture_coefficients.push_back(0.0f);
+                texture_coefficients.push_back(0.0f);
+            }
+
+            bone_id_data.push_back(weapon.boneIndex);
+            bone_id_data.push_back(0);
+            bone_id_data.push_back(0);
+            bone_id_data.push_back(0);
+            bone_weight_data.push_back(1.0f);
+            bone_weight_data.push_back(0.0f);
+            bone_weight_data.push_back(0.0f);
+            bone_weight_data.push_back(0.0f);
+        }
+
+        size_t last_index = indices.size() - 1;
+
+        SceneObject theobject;
+        theobject.name = weapon.name;
+        theobject.first_index = first_index;
+        theobject.num_indices = last_index - first_index + 1;
+        theobject.rendering_mode = GL_TRIANGLES;
+        theobject.vertex_array_object_id = vertex_array_object_id;
+        theobject.texture_id = 0;
+        theobject.sampler_id = 0;
+        theobject.bbox_min = glm::vec4(+std::numeric_limits<float>::max(),
+                                        +std::numeric_limits<float>::max(),
+                                        +std::numeric_limits<float>::max(), 1.0f);
+        theobject.bbox_max = glm::vec4(-std::numeric_limits<float>::max(),
+                                        -std::numeric_limits<float>::max(),
+                                        -std::numeric_limits<float>::max(), 1.0f);
+        for (size_t i = 0; i < weapon.vertices.size() / 3; ++i)
+        {
+            theobject.bbox_min.x = std::min(theobject.bbox_min.x, weapon.vertices[3*i+0]);
+            theobject.bbox_min.y = std::min(theobject.bbox_min.y, weapon.vertices[3*i+1]);
+            theobject.bbox_min.z = std::min(theobject.bbox_min.z, weapon.vertices[3*i+2]);
+            theobject.bbox_max.x = std::max(theobject.bbox_max.x, weapon.vertices[3*i+0]);
+            theobject.bbox_max.y = std::max(theobject.bbox_max.y, weapon.vertices[3*i+1]);
+            theobject.bbox_max.z = std::max(theobject.bbox_max.z, weapon.vertices[3*i+2]);
+        }
+
+        g_VirtualScene[weapon.name] = theobject;
+        printf("  Weapon '%s': first=%zu, num=%zu, bone=%d\n",
+               weapon.name.c_str(), first_index, theobject.num_indices, weapon.boneIndex);
+    }
+
     GLuint VBO_model_coefficients_id;
     glGenBuffers(1, &VBO_model_coefficients_id);
     glBindBuffer(GL_ARRAY_BUFFER, VBO_model_coefficients_id);
@@ -4094,21 +4507,54 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
         fflush(stdout);
     }
 
-    if (key == GLFW_KEY_O && action == GLFW_PRESS && g_CollidedWithAVine)
+    // O = iniciar/parar escalada (vine ou ladder)
+    // Se já está escalando algo, O para. Se não, O inicia o tipo mais próximo.
+    if (key == GLFW_KEY_O && action == GLFW_PRESS)
     {
-        g_IsClimbingAVine = !g_IsClimbingAVine;
+        printf("[O KEY] pressed. climbingVine=%d climbingLadder=%d collidedVine=%d collidedLadder=%d\n",
+               g_IsClimbingAVine, g_IsClimbingALadder, g_CollidedWithAVine, g_CollidedWithALadder);
+        printf("[O KEY] pos=(%.1f,%.1f,%.1f) onGround=%d\n",
+               g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
+               g_PlayerOnGround);
+
         if (g_IsClimbingAVine)
-            printf("Started climbing vine!\n");
+        {
+            g_IsClimbingAVine = false;
+            CollisionOBB ground_test = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
+            CollisionShapeType ground_col = CollidesWithScenarioObb(ground_test, g_ScenarioCollisionShapes);
+            g_PlayerOnGround = (ground_col == CollisionShapeType::SOLID);
+            g_PlayerVerticalVelocity = 0.0f;
+            g_SpacePressed = false;
+            g_AttackPressed = false;
+            printf("[O KEY] Stopped vine. ground_col=%d onGround=%d\n", (int)ground_col, g_PlayerOnGround);
+        }
+        else if (g_IsClimbingALadder)
+        {
+            g_IsClimbingALadder = false;
+            CollisionOBB ground_test = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
+            CollisionShapeType ground_col = CollidesWithScenarioObb(ground_test, g_ScenarioCollisionShapes);
+            g_PlayerOnGround = (ground_col == CollisionShapeType::SOLID);
+            g_PlayerVerticalVelocity = 0.0f;
+            g_SpacePressed = false;
+            g_AttackPressed = false;
+            printf("[O KEY] Stopped ladder. ground_col=%d onGround=%d\n", (int)ground_col, g_PlayerOnGround);
+        }
+        else if (g_CollidedWithALadder)
+        {
+            g_IsClimbingALadder = true;
+            g_PlayerVerticalVelocity = 0.0f;
+            printf("[O KEY] Started ladder!\n");
+        }
+        else if (g_CollidedWithAVine)
+        {
+            g_IsClimbingAVine = true;
+            g_PlayerVerticalVelocity = 0.0f;
+            printf("[O KEY] Started vine!\n");
+        }
         else
-            printf("Stopped climbing vine!\n");
-    }
-    if (key == GLFW_KEY_O && action == GLFW_PRESS && g_CollidedWithALadder)
-    {
-        g_IsClimbingALadder = !g_IsClimbingALadder;
-        if (g_IsClimbingALadder)
-            printf("Started climbing ladder!\n");
-        else
-            printf("Stopped climbing ladder!\n");
+        {
+            printf("[O KEY] No vine/ladder nearby to start climbing.\n");
+        }
     }
 
     // Atualiza flags de input para movimento (desabilitado em primeira pessoa)
@@ -4128,6 +4574,17 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
         g_AttackPressed = (action == GLFW_PRESS);
     if (key == GLFW_KEY_Q)
         g_DefendPressed = (action != GLFW_RELEASE);
+
+    // Seleciona variante de ataque (1-9)
+    if (action == GLFW_PRESS && key >= GLFW_KEY_1 && key <= GLFW_KEY_9)
+    {
+        int idx = key - GLFW_KEY_1;
+        if (idx < (int)g_AttackVariantNames.size()) {
+            g_CurrentAttackVariant = idx;
+            g_PlayerStateMachine.SetAttackVariant(idx);
+            printf("[ATTACK] Variante selecionada: %d = '%s'\n", idx, g_AttackVariantNames[idx].c_str());
+        }
+    }
 }
 // Definimos o callback para impressão de erros da GLFW no terminal
 void ErrorCallback(int error, const char *description)

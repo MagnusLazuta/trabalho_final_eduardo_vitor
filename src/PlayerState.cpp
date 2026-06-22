@@ -16,7 +16,7 @@ int PlayerStateMachine::GetAnimationIndex() const {
         case PlayerState::RUNNING:          return 3;
         case PlayerState::CLIMBING_VINE:    return 2;
         case PlayerState::CLIMBING_LADDER:  return 2;
-        case PlayerState::ATTACKING:        return 4;
+        case PlayerState::ATTACKING:        return 6 + m_attackVariant;
         case PlayerState::DEFENDING:        return 5;
         case PlayerState::JUMPING:          return 6;
     }

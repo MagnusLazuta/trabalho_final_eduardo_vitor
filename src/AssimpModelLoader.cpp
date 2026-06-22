@@ -614,6 +614,7 @@ void AssimpModelLoader::ReadNodeHierarchy(float animationTime, aiNode* node, con
     if (boneIt != m_boneInfoMap.end()) {
         boneIt->second.finalTransformation = m_globalInverseTransform * globalTransformation * boneIt->second.offset;
         m_boneWorldPositions[nodeNameCStr] = glm::vec3(globalTransformation[3]);
+        m_boneWorldTransforms[nodeNameCStr] = globalTransformation;
         if (strcmp(nodeNameCStr, "mixamorig:Hips") == 0) {
             m_hipsWorldPosition = glm::vec4(globalTransformation[3].x, globalTransformation[3].y, globalTransformation[3].z, 1.0f);
         }

@@ -87,6 +87,11 @@ public:
     void GetFinalBoneTransforms(std::vector<glm::mat4>& transforms);
     glm::vec4 GetHipsWorldPosition() const { return m_hipsWorldPosition; }
     const glm::vec4& GetHipsWorldPositionRef() const { return m_hipsWorldPosition; }
+    glm::mat4 GetBoneWorldTransform(const std::string& boneName) const {
+        auto it = m_boneWorldTransforms.find(boneName);
+        if (it != m_boneWorldTransforms.end()) return it->second;
+        return glm::mat4(1.0f);
+    }
     float GetCurrentTicksPerSecond() const {
         if (m_currentAnimation >= 0 && m_currentAnimation < (int)m_animations.size())
             return m_animations[m_currentAnimation].ticksPerSecond;
@@ -145,6 +150,7 @@ private:
     // Cache de posições world (model-space) dos ossos, preenchido pelo último
     // SampleBoneHierarchy ou GetBoneTransforms (via ReadNodeHierarchy).
     mutable std::unordered_map<std::string, glm::vec3> m_boneWorldPositions;
+    mutable std::unordered_map<std::string, glm::mat4> m_boneWorldTransforms;
     
     void ExtractBoneWeightForVertices(AssimpMeshData& mesh, aiMesh* aiMesh, const aiScene* scene);
     void InitBoneTransforms();

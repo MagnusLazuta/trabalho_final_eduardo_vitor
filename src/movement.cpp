@@ -28,6 +28,33 @@ static bool IsPositionFree(const glm::vec4 &pos, const glm::vec4 &halfExt, float
     return true;
 }
 
+// Helper para escalada: ignora colisão com VINES/LADDER (permite subir nelas)
+static bool IsPositionFreeForClimbing(const glm::vec4 &pos, const glm::vec4 &halfExt, float yaw)
+{
+    CollisionOBB obb = {pos, halfExt, yaw};
+    const CollisionAABB obb_aabb = ComputeObbAabb(obb);
+
+    for (size_t i = 0; i < g_ScenarioCollisionShapes.size(); ++i)
+    {
+        const CollisionShape &shape = g_ScenarioCollisionShapes[i];
+        if (shape.type == CollisionShapeType::VINES || shape.type == CollisionShapeType::LADDER)
+            continue;
+
+        CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
+        if (!AabbAabbIntersect(obb_aabb, shape_aabb))
+            continue;
+
+        for (size_t t = 0; t < shape.triangles.size(); ++t)
+        {
+            if (TriangleIntersectsObb(shape.triangles[t], obb))
+                return false;
+        }
+    }
+    if (QueryBlockingEnemyCollision(pos, halfExt))
+        return false;
+    return true;
+}
+
 // Tenta movimento horizontal com step climbing incremental
 static bool TryMoveHorizontal(glm::vec4 &pos, float delta, int axis,
                                const glm::vec4 &halfExt, float yaw, float margin)
@@ -66,6 +93,17 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
         float climb_speed = g_IsClimbingALadder ? 2.0f : 1.5f;
         if (g_WPressed) vertical_move_amount += climb_speed * delta_time;
         if (g_SPressed) vertical_move_amount -= climb_speed * delta_time;
+
+        static int climbDebugCounter = 0;
+        climbDebugCounter++;
+        if (climbDebugCounter % 60 == 0)
+        {
+            printf("[CLIMB MOVE] type=%s vertical=%.3f pos=(%.1f,%.1f,%.1f) W=%d S=%d\n",
+                   g_IsClimbingALadder ? "LADDER" : "VINE",
+                   vertical_move_amount,
+                   g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
+                   g_WPressed, g_SPressed);
+        }
 
         if (g_IsClimbingAVine)
         {
@@ -129,16 +167,48 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     glm::vec4 test_pos_y = updated_position;
     test_pos_y.y += vertical_move_amount;
     
-    if (IsPositionFree(test_pos_y, g_PlayerCubeHalfExtents, g_PlayerYaw))
+    // Durante escalada, ignora colisão com vine/ladder e usa half extents pequenos
+    // para não colidir com a parede ao lado, mas ainda detecta chão/teto SOLID
+    bool yFree;
+    if (g_IsClimbingALadder || g_IsClimbingAVine)
+    {
+        glm::vec4 climb_extents(0.1f, 0.1f, 0.1f, 0.0f);
+        yFree = IsPositionFreeForClimbing(test_pos_y, climb_extents, g_PlayerYaw);
+    }
+    else
+        yFree = IsPositionFree(test_pos_y, g_PlayerCubeHalfExtents, g_PlayerYaw);
+
+    if (yFree)
     {
         updated_position.y = test_pos_y.y;
         if (!g_IsClimbingALadder && !g_IsClimbingAVine)
+        {
+            if (g_PlayerOnGround)
+            {
+                static int fallDebugCounter = 0;
+                fallDebugCounter++;
+                if (fallDebugCounter % 30 == 0)
+                {
+                    printf("[FALL] Left ground at pos=(%.1f,%.1f,%.1f) vel=%.2f\n",
+                           updated_position.x, updated_position.y, updated_position.z,
+                           g_PlayerVerticalVelocity);
+                }
+            }
             g_PlayerOnGround = false;
+        }
     }
     else
     {
         g_PlayerVerticalVelocity = 0.0f;
-        g_PlayerOnGround = true;
+        // Só marca onGround se NÃO estiver escalando
+        if (!g_IsClimbingALadder && !g_IsClimbingAVine)
+            g_PlayerOnGround = true;
+
+        if (g_IsClimbingALadder || g_IsClimbingAVine)
+        {
+            printf("[CLIMB Y-BLOCKED] move=%.3f testY=%.1f curY=%.1f\n",
+                   vertical_move_amount, test_pos_y.y, updated_position.y);
+        }
     }
 
     g_PlayerCubePosition = updated_position;
@@ -152,12 +222,136 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     CollisionShapeType real_col = CollidesWithScenarioObb(real_obb, g_ScenarioCollisionShapes);
     g_PlayerCubeColliding = (real_col == CollisionShapeType::SOLID || real_col == CollisionShapeType::DOOR || real_col == CollisionShapeType::WATER);
 
-    if (g_IsClimbingAVine && !g_CollidedWithAVine) g_IsClimbingAVine = false;
-    if (g_IsClimbingALadder && !g_CollidedWithALadder) g_IsClimbingALadder = false;
+    if (g_IsClimbingAVine || g_IsClimbingALadder)
+    {
+        static int colDebugCounter = 0;
+        colDebugCounter++;
+        if (colDebugCounter % 60 == 0)
+        {
+            printf("[CLIMB COL] vine=%d ladder=%d real=%d pos=(%.1f,%.1f,%.1f) yaw=%.1f\n",
+                   g_CollidedWithAVine, g_CollidedWithALadder, (int)real_col,
+                   g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
+                   g_PlayerYaw);
+        }
+    }
+
+    // Auto-stop: quando não colide mais com vine/ladder, para após grace period
+    // independente do input (evita voar segurando W)
+    static float vineGraceTimer = 0.0f;
+    static float ladderGraceTimer = 0.0f;
+    const float grace_period = 0.3f;
+
+    if (g_IsClimbingAVine) {
+        if (!g_CollidedWithAVine) {
+            vineGraceTimer += delta_time;
+            if (vineGraceTimer > grace_period) {
+                g_IsClimbingAVine = false;
+                vineGraceTimer = 0.0f;
+                CollisionOBB ground_test = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
+                CollisionShapeType ground_col = CollidesWithScenarioObb(ground_test, g_ScenarioCollisionShapes);
+                g_PlayerOnGround = (ground_col == CollisionShapeType::SOLID);
+                g_PlayerVerticalVelocity = 0.0f;
+                g_SpacePressed = false;
+                g_AttackPressed = false;
+            }
+        } else {
+            vineGraceTimer = 0.0f;
+        }
+    }
+    if (g_IsClimbingALadder) {
+        if (!g_CollidedWithALadder) {
+            ladderGraceTimer += delta_time;
+            if (ladderGraceTimer > grace_period) {
+                g_IsClimbingALadder = false;
+                ladderGraceTimer = 0.0f;
+                CollisionOBB ground_test = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
+                CollisionShapeType ground_col = CollidesWithScenarioObb(ground_test, g_ScenarioCollisionShapes);
+                g_PlayerOnGround = (ground_col == CollisionShapeType::SOLID);
+                g_PlayerVerticalVelocity = 0.0f;
+                g_SpacePressed = false;
+                g_AttackPressed = false;
+            }
+        } else {
+            ladderGraceTimer = 0.0f;
+        }
+    }
 
     glfwSetWindowTitle(
         window,
         g_PlayerCubeColliding ? "INF01047 - Colisao: DETECTADA" : "INF01047 - Colisao: livre");
 
     return move_input;
+}
+
+void SnapPlayerToNearestVine()
+{
+    glm::vec4 detection_extents = g_PlayerCubeHalfExtents * 2.0f;
+    CollisionOBB detection_obb = {g_PlayerCubePosition, detection_extents, g_PlayerYaw};
+
+    float best_dist = 1e30f;
+    glm::vec4 best_point(0.0f);
+    glm::vec4 best_normal(0.0f);
+
+    for (size_t i = 0; i < g_ScenarioCollisionShapes.size(); ++i)
+    {
+        const CollisionShape &shape = g_ScenarioCollisionShapes[i];
+        if (shape.type != CollisionShapeType::VINES && shape.type != CollisionShapeType::LADDER)
+            continue;
+
+        const CollisionAABB obb_aabb = ComputeObbAabb(detection_obb);
+        CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
+        if (!AabbAabbIntersect(obb_aabb, shape_aabb))
+            continue;
+
+        for (size_t t = 0; t < shape.triangles.size(); ++t)
+        {
+            if (!TriangleIntersectsObb(shape.triangles[t], detection_obb))
+                continue;
+
+            const Triangle &tri = shape.triangles[t];
+            glm::vec4 e1 = tri.v2 - tri.v1;
+            glm::vec4 e2 = tri.v3 - tri.v1;
+            glm::vec4 n = crossproduct(e1, e2);
+            float nlen = std::sqrt(dotproduct(n, n));
+            if (nlen < 1e-6f) continue;
+            n = n / nlen;
+            n.w = 0.0f;
+
+            // Closest point on triangle to player (in XZ plane)
+            glm::vec4 to_player = g_PlayerCubePosition - tri.v1;
+            to_player.y = 0.0f;
+            float d1 = dotproduct(e1, to_player);
+            float d2 = dotproduct(e2, to_player);
+            float dot00 = dotproduct(e1, e1);
+            float dot11 = dotproduct(e2, e2);
+            float dot01 = dotproduct(e1, e2);
+            float denom = dot00 * dot11 - dot01 * dot01;
+            if (std::abs(denom) < 1e-6f) continue;
+            float u = (d1 * dot11 - d2 * dot01) / denom;
+            float v = (d2 * dot00 - d1 * dot01) / denom;
+            u = std::max(0.0f, std::min(1.0f, u));
+            v = std::max(0.0f, std::min(1.0f - u, v));
+            glm::vec4 closest = tri.v1 + u * e1 + v * e2;
+
+            float dx = closest.x - g_PlayerCubePosition.x;
+            float dz = closest.z - g_PlayerCubePosition.z;
+            float dist = dx * dx + dz * dz;
+            if (dist < best_dist)
+            {
+                best_dist = dist;
+                best_point = closest;
+                best_normal = n;
+            }
+        }
+    }
+
+    if (best_dist < 1e29f)
+    {
+        // Snap XZ to closest point, offset slightly outward along normal
+        g_PlayerCubePosition.x = best_point.x + best_normal.x * 0.1f;
+        g_PlayerCubePosition.z = best_point.z + best_normal.z * 0.1f;
+        printf("[SNAP VINE] Snapped to vine surface at (%.1f, %.1f, %.1f) normal=(%.1f,%.1f,%.1f)\n",
+               g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
+               best_normal.x, best_normal.y, best_normal.z);
+    }
 }
