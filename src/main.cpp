@@ -353,9 +353,9 @@ const int OBJECT_ID_PLAYER_CUBE = 4;
 const int OBJECT_ID_DEBUG_CUBE = 6;
 const int OBJECT_ID_SPHERE = 0;
 const int OBJECT_ID_PROJECTILE = 5;
-<<<<<<< HEAD
 const int OBJECT_ID_PLAYER = 7;
 const int OBJECT_ID_ENEMY = 8;
+const int OBJECT_ID_EFFECT = 9;
 
 // Variáveis para o modelo do jogador e animação
 AssimpModelLoader g_PlayerModelLoader;
@@ -381,10 +381,6 @@ float g_SwordModelScale = 1.0f;
 float g_ShieldModelScale = 1.0f;
 
 // Animações
-=======
-const int OBJECT_ID_ENEMY = 7;
-const int OBJECT_ID_EFFECT = 8;
->>>>>>> main
 
 glm::vec4 camera_position_c;
 glm::vec4 camera_lookat_l;
