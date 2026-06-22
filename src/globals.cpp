@@ -31,3 +31,6 @@ bool g_ShowDebugHitboxes = false;
 bool g_ShowPlayerCoords = false;
 
 PlayerStateMachine g_PlayerStateMachine;
+
+std::vector<DoorInstance> g_Doors;
+bool g_EnterPressed = false;

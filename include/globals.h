@@ -36,3 +36,7 @@ extern int   g_SwordDamage;
 // Debug drawing
 extern bool g_ShowDebugHitboxes;
 extern bool g_ShowPlayerCoords;
+
+// Sistema de portas
+extern std::vector<DoorInstance> g_Doors;
+extern bool g_EnterPressed;

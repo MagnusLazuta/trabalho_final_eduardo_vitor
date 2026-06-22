@@ -3,6 +3,7 @@
 
 #include <glm/vec4.hpp>
 #include <vector>
+#include <string>
 #include "matrices.h"
 #include "types.h"
 
@@ -50,6 +51,26 @@ struct CollisionShape
     std::vector<Triangle> triangles;
 };
 
+enum class DoorState
+{
+    CLOSED,
+    OPENING,
+    OPEN,
+    CLOSING,
+};
+
+struct DoorInstance
+{
+    DoorState state = DoorState::CLOSED;
+    float current_y_offset = 0.0f;
+    float target_height = 2.0f;
+    float open_timer = 0.0f;
+    glm::vec4 bbox_center = glm::vec4(0.0f);
+    glm::vec4 bbox_min = glm::vec4(0.0f);
+    glm::vec4 bbox_max = glm::vec4(0.0f);
+    std::vector<Triangle> original_triangles;
+};
+
 // Broad Phase: AABB vs AABB
 bool AabbAabbIntersect(CollisionAABB a, CollisionAABB b);
 
@@ -83,5 +104,10 @@ static bool OverlapOnAxis(
     const glm::vec4 &v2,
     const glm::vec4 &axis,
     const glm::vec4 &half_extents);
+
+int FindDoorIndexByBBox(const glm::vec4 &bbox_center, const std::vector<DoorInstance> &doors);
+
+bool BBoxOverlap(const glm::vec4 &a_min, const glm::vec4 &a_max,
+                 const glm::vec4 &b_min, const glm::vec4 &b_max);
 
 #endif // _COLLISION_H

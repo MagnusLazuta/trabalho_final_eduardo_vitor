@@ -28,6 +28,50 @@ static bool IsPositionFree(const glm::vec4 &pos, const glm::vec4 &halfExt, float
     return true;
 }
 
+// Helper: como IsPositionFree mas ignora portas abertas (para movimento horizontal)
+static bool IsDoorShapeOpen(const CollisionShape &shape)
+{
+    glm::vec4 center = (shape.bbox_min + shape.bbox_max) * 0.5f;
+    for (const auto &door : g_Doors)
+    {
+        if (door.state == DoorState::CLOSED)
+            continue;
+        float dx = door.bbox_center.x - center.x;
+        float dz = door.bbox_center.z - center.z;
+        if (dx * dx + dz * dz < 0.01f)
+            return true;
+    }
+    return false;
+}
+
+static bool IsPositionFreeWalkThrough(const glm::vec4 &pos, const glm::vec4 &halfExt, float yaw)
+{
+    CollisionOBB obb = {pos, halfExt, yaw};
+    const CollisionAABB obb_aabb = ComputeObbAabb(obb);
+
+    for (size_t i = 0; i < g_ScenarioCollisionShapes.size(); ++i)
+    {
+        const CollisionShape &shape = g_ScenarioCollisionShapes[i];
+        if (shape.type == CollisionShapeType::NONE)
+            continue;
+        if (shape.type == CollisionShapeType::DOOR && IsDoorShapeOpen(shape))
+            continue;
+
+        CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
+        if (!AabbAabbIntersect(obb_aabb, shape_aabb))
+            continue;
+
+        for (size_t t = 0; t < shape.triangles.size(); ++t)
+        {
+            if (TriangleIntersectsObb(shape.triangles[t], obb))
+                return false;
+        }
+    }
+    if (QueryBlockingEnemyCollision(pos, halfExt))
+        return false;
+    return true;
+}
+
 // Helper para escalada: ignora colisão com VINES/LADDER (permite subir nelas)
 static bool IsPositionFreeForClimbing(const glm::vec4 &pos, const glm::vec4 &halfExt, float yaw)
 {
@@ -63,7 +107,7 @@ static bool TryMoveHorizontal(glm::vec4 &pos, float delta, int axis,
     test.y += margin / 2.0f;
     (axis == 0 ? test.x : test.z) += delta;
 
-    if (IsPositionFree(test, halfExt, yaw)) {
+    if (IsPositionFreeWalkThrough(test, halfExt, yaw)) {
         (axis == 0 ? pos.x : pos.z) = (axis == 0 ? test.x : test.z);
         return true;
     }
@@ -71,7 +115,7 @@ static bool TryMoveHorizontal(glm::vec4 &pos, float delta, int axis,
     for (float lifted = step_subdiv; lifted <= step_height + 0.001f; lifted += step_subdiv) {
         glm::vec4 step = test;
         step.y += lifted;
-        if (IsPositionFree(step, halfExt, yaw)) {
+        if (IsPositionFreeWalkThrough(step, halfExt, yaw)) {
             pos.x = step.x;
             pos.y = step.y;
             pos.z = step.z;
@@ -177,6 +221,34 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     }
     else
         yFree = IsPositionFree(test_pos_y, g_PlayerCubeHalfExtents, g_PlayerYaw);
+
+    if (!yFree)
+    {
+        CollisionOBB test_obb = {test_pos_y, g_PlayerCubeHalfExtents, g_PlayerYaw};
+        CollisionShapeType block_col = CollidesWithScenarioObb(test_obb, g_ScenarioCollisionShapes);
+        printf("[DOOR DEBUG] Y-BLOCKED! block_type=%d pos=(%.2f,%.2f,%.2f) testY=%.2f vel=%.2f\n",
+               (int)block_col,
+               g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
+               test_pos_y.y, g_PlayerVerticalVelocity);
+        if (block_col == CollisionShapeType::DOOR)
+        {
+            CollisionAABB obb_aabb = ComputeObbAabb(test_obb);
+            for (size_t i = 0; i < g_ScenarioCollisionShapes.size(); ++i)
+            {
+                const auto &cs = g_ScenarioCollisionShapes[i];
+                if (cs.type != CollisionShapeType::DOOR)
+                    continue;
+                CollisionAABB shape_aabb = {cs.bbox_min, cs.bbox_max};
+                if (!AabbAabbIntersect(obb_aabb, shape_aabb))
+                    continue;
+                printf("[DOOR DEBUG]   DOOR shape[%zu] bbox=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f) tri_count=%zu\n",
+                       i,
+                       cs.bbox_min.x, cs.bbox_min.y, cs.bbox_min.z,
+                       cs.bbox_max.x, cs.bbox_max.y, cs.bbox_max.z,
+                       cs.triangles.size());
+            }
+        }
+    }
 
     if (yFree)
     {

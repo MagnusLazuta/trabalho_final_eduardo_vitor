@@ -1914,6 +1914,35 @@ int main()
         g_SceneParts.push_back(part);
     }
 
+    // Coleta todas as portas (DOOR) de todas as cenas
+    g_Doors.clear();
+    for (size_t part_idx = 0; part_idx < g_SceneParts.size(); ++part_idx)
+    {
+        for (size_t si = 0; si < g_SceneParts[part_idx].collision_shapes.size(); ++si)
+        {
+            const CollisionShape &cs = g_SceneParts[part_idx].collision_shapes[si];
+            if (cs.type == CollisionShapeType::DOOR)
+            {
+                DoorInstance door;
+                door.state = DoorState::CLOSED;
+                door.current_y_offset = 0.0f;
+                door.open_timer = 0.0f;
+                door.bbox_center = (cs.bbox_min + cs.bbox_max) * 0.5f;
+                door.bbox_min = cs.bbox_min;
+                door.bbox_max = cs.bbox_max;
+                door.original_triangles = cs.triangles;
+                door.target_height = cs.bbox_max.y - cs.bbox_min.y;
+                if (door.target_height < 0.5f)
+                    door.target_height = 2.0f;
+                g_Doors.push_back(door);
+                printf("  Porta encontrada: center=(%.1f,%.1f,%.1f) height=%.1f\n",
+                       door.bbox_center.x, door.bbox_center.y, door.bbox_center.z,
+                       door.target_height);
+            }
+        }
+    }
+    printf("Total de portas: %zu\n", g_Doors.size());
+
     // Computa adjacencia entre as cenas (AABB overlap com margem)
     printf("\n=== Computando adjacencia entre cenas ===\n");
     const float adjacency_margin = 1.5f;
@@ -2494,6 +2523,126 @@ int main()
         CheckSwordEnemyCollisions(delta_time);
         UpdateParticles(delta_time);
 
+        // --- Sistema de portas ---
+        // Detecta ENTER pressionado perto de uma porta
+        if (g_EnterPressed)
+        {
+            g_EnterPressed = false;
+            CollisionOBB player_obb = {g_PlayerCubePosition, g_PlayerCubeHalfExtents * 1.5f, g_PlayerYaw};
+            for (size_t si = 0; si < g_ScenarioCollisionShapes.size(); ++si)
+            {
+                if (g_ScenarioCollisionShapes[si].type != CollisionShapeType::DOOR)
+                    continue;
+                CollisionAABB shape_aabb = {g_ScenarioCollisionShapes[si].bbox_min,
+                                            g_ScenarioCollisionShapes[si].bbox_max};
+                CollisionAABB obb_aabb = ComputeObbAabb(player_obb);
+                if (!AabbAabbIntersect(obb_aabb, shape_aabb))
+                    continue;
+                // Encontrou porta proxima — inicia abertura
+                glm::vec4 center = (g_ScenarioCollisionShapes[si].bbox_min +
+                                    g_ScenarioCollisionShapes[si].bbox_max) * 0.5f;
+                int door_idx = FindDoorIndexByBBox(center, g_Doors);
+                printf("[DOOR] ENTER! player=(%.2f,%.2f,%.2f) door_center=(%.2f,%.2f,%.2f) door_bbox=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f)\n",
+                       g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
+                       center.x, center.y, center.z,
+                       g_ScenarioCollisionShapes[si].bbox_min.x, g_ScenarioCollisionShapes[si].bbox_min.y, g_ScenarioCollisionShapes[si].bbox_min.z,
+                       g_ScenarioCollisionShapes[si].bbox_max.x, g_ScenarioCollisionShapes[si].bbox_max.y, g_ScenarioCollisionShapes[si].bbox_max.z);
+                if (door_idx >= 0 && g_Doors[door_idx].state == DoorState::CLOSED)
+                {
+                    g_Doors[door_idx].state = DoorState::OPENING;
+                    printf("[DOOR] Abrindo porta em (%.1f,%.1f,%.1f)\n",
+                           center.x, center.y, center.z);
+                }
+                break;
+            }
+        }
+
+        // Atualiza animação das portas
+        const float door_speed = 3.0f;
+        for (auto &door : g_Doors)
+        {
+            // Log: lista todas as shapes na região da porta
+            static int shapeLogDone = 0;
+            if (door.state == DoorState::OPENING && shapeLogDone == 0)
+            {
+                shapeLogDone = 1;
+                printf("[DOOR SHAPES] Todas as shapes perto da porta center=(%.1f,%.1f,%.1f):\n",
+                       door.bbox_center.x, door.bbox_center.y, door.bbox_center.z);
+                for (size_t i = 0; i < g_ScenarioCollisionShapes.size(); ++i)
+                {
+                    const auto &cs = g_ScenarioCollisionShapes[i];
+                    CollisionAABB door_aabb = {door.bbox_min, door.bbox_max};
+                    CollisionAABB shape_aabb = {cs.bbox_min, cs.bbox_max};
+                    if (!AabbAabbIntersect(door_aabb, shape_aabb))
+                        continue;
+                    printf("  shape[%zu] type=%d bbox=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f) tris=%zu\n",
+                           i, (int)cs.type,
+                           cs.bbox_min.x, cs.bbox_min.y, cs.bbox_min.z,
+                           cs.bbox_max.x, cs.bbox_max.y, cs.bbox_max.z,
+                           cs.triangles.size());
+                }
+            }
+            switch (door.state)
+            {
+            case DoorState::OPENING:
+            {
+                door.current_y_offset = SmoothApproach(door.current_y_offset,
+                                                       door.target_height,
+                                                       door_speed, delta_time);
+                if (door.current_y_offset >= door.target_height * 0.95f)
+                {
+                    door.current_y_offset = door.target_height;
+                    door.state = DoorState::OPEN;
+                    door.open_timer = 5.0f;
+                    printf("[DOOR] Porta aberta, timer = 5.0s\n");
+                }
+                break;
+            }
+            case DoorState::OPEN:
+            {
+                door.open_timer -= delta_time;
+                if (door.open_timer <= 0.0f)
+                {
+                    door.state = DoorState::CLOSING;
+                    printf("[DOOR] Porta fechando\n");
+                }
+                break;
+            }
+            case DoorState::CLOSING:
+            {
+                door.current_y_offset = SmoothApproach(door.current_y_offset,
+                                                       0.0f,
+                                                       door_speed, delta_time);
+                if (door.current_y_offset <= 0.01f)
+                {
+                    door.current_y_offset = 0.0f;
+                    door.state = DoorState::CLOSED;
+                    printf("[DOOR] Porta fechada\n");
+                }
+                break;
+            }
+            case DoorState::CLOSED:
+                break;
+            }
+        }
+
+        // Log periódico do estado das portas
+        static int doorLogCounter = 0;
+        doorLogCounter++;
+        if (doorLogCounter % 60 == 0 && !g_Doors.empty())
+        {
+            for (size_t di = 0; di < g_Doors.size(); ++di)
+            {
+                printf("[DOOR STATE] door[%zu] state=%d offset=%.3f timer=%.1f center=(%.1f,%.1f,%.1f)\n",
+                       di, (int)g_Doors[di].state, g_Doors[di].current_y_offset,
+                       g_Doors[di].open_timer,
+                       g_Doors[di].bbox_center.x, g_Doors[di].bbox_center.y, g_Doors[di].bbox_center.z);
+            }
+            printf("[DOOR STATE] player=(%.2f,%.2f,%.2f) onGround=%d vel=%.2f\n",
+                   g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
+                   g_PlayerOnGround, g_PlayerVerticalVelocity);
+        }
+
         // Aqui executamos as operações de renderização
 
         // Definimos a cor do "fundo" do framebuffer como branco.  Tal cor é
@@ -2656,7 +2805,37 @@ int main()
         {
             for (auto &name : g_SceneParts[idx].render_object_names)
             {
+                float door_y_offset = 0.0f;
+                if (g_Doors.size() > 0 && g_VirtualScene.find(name) != g_VirtualScene.end())
+                {
+                    const SceneObject &obj = g_VirtualScene[name];
+                    glm::vec4 obj_center = (obj.bbox_min + obj.bbox_max) * 0.5f;
+                    for (const auto &door : g_Doors)
+                    {
+                        if (door.current_y_offset > 0.01f &&
+                            obj_center.x >= door.bbox_min.x && obj_center.x <= door.bbox_max.x &&
+                            obj_center.y >= door.bbox_min.y && obj_center.y <= door.bbox_max.y &&
+                            obj_center.z >= door.bbox_min.z && obj_center.z <= door.bbox_max.z)
+                        {
+                            door_y_offset = door.current_y_offset;
+                            break;
+                        }
+                    }
+                }
+                if (door_y_offset > 0.01f)
+                {
+                    glm::mat4 door_model = model * Matrix_Translate(0.0f, door_y_offset, 0.0f);
+                    glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(door_model));
+                    glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE,
+                                       glm::value_ptr(glm::transpose(glm::inverse(door_model))));
+                }
                 DrawVirtualObject(name.c_str());
+                if (door_y_offset > 0.01f)
+                {
+                    glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+                    glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE,
+                                       glm::value_ptr(glm::transpose(glm::inverse(model))));
+                }
             }
         }
         glEnable(GL_CULL_FACE);
@@ -4708,6 +4887,9 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
         g_AttackPressed = (action == GLFW_PRESS);
     if (key == GLFW_KEY_Q)
         g_DefendPressed = (action != GLFW_RELEASE);
+
+    if (key == GLFW_KEY_ENTER)
+        g_EnterPressed = (action == GLFW_PRESS);
 
     // Seleciona variante de ataque (1-9)
     if (action == GLFW_PRESS && key >= GLFW_KEY_1 && key <= GLFW_KEY_9)
