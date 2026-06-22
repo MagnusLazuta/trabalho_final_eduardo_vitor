@@ -1,0 +1,14 @@
+{
+  "areas": [
+    {
+      "id": "scene00_area01",
+      "enemies": [
+        { "type": "baba", "position": [2.8, 0.85, -3.68] },
+        { "type": "baba", "position": [-4.95, 0.85, 1.25] },
+        { "type": "baba", "position": [2.31, 0.85, 4.58] },
+        { "type": "small spider", "position": [7.51, 11.11, -6.14] },
+        { "type": "small spider", "position": [3.03, 12.78, -9.14] }
+      ]
+    }
+  ]
+}
