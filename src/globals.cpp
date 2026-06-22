@@ -22,6 +22,11 @@ bool g_IsClimbingALadder = false;
 bool g_CollidedWithAVine = false;
 bool g_CollidedWithALadder = false;
 
+bool  g_SwordAttackHitActive = false;
+float g_SwordAttackHitCooldown = 0.0f;
+std::vector<bool> g_SwordHitEnemies;
+int   g_SwordDamage = 1;
+
 bool g_ShowDebugHitboxes = false;
 bool g_ShowPlayerCoords = false;
 

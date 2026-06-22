@@ -1422,3 +1422,23 @@ bool QueryBlockingEnemyCollision(const glm::vec4 &center, const glm::vec4 &half_
 
     return false;
 }
+
+int QuerySwordHitEnemy(const glm::vec4 &sword_box_center, const glm::vec4 &sword_box_half_extents)
+{
+    for (std::size_t i = 0; i < g_Enemies.size(); ++i)
+    {
+        const Enemy &enemy = g_Enemies[i];
+        if (!enemy.active || enemy.dead || !enemy.visible || enemy.state == EnemyState::Dying)
+            continue;
+
+        if (BoxesIntersect(sword_box_center, sword_box_half_extents, enemy.position, enemy.collision_half_extents))
+            return static_cast<int>(i);
+    }
+
+    return -1;
+}
+
+std::size_t GetEnemyCount()
+{
+    return g_Enemies.size();
+}

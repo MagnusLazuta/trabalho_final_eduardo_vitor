@@ -106,7 +106,12 @@ struct ObjModel
         {
             if (!materials[i].diffuse_texname.empty())
             {
-                std::string textpath = std::string(basepath) + materials[i].diffuse_texname;
+                std::string texname = materials[i].diffuse_texname;
+                std::string textpath;
+                if (!texname.empty() && texname[0] == '/')
+                    textpath = texname;
+                else
+                    textpath = std::string(basepath) + texname;
                 GLuint texture_id = LoadTextureImage(textpath.c_str());
                 printf("[ModelLoad] material='%s' diffuse='%s' texture_id=%u\n",
                        materials[i].name.c_str(),
@@ -979,6 +984,69 @@ static void UpdateSlingshotProjectile(float delta_time)
         // TODO: Usar ponto de contato e normal reais quando a colisao expuser esses dados.
         SpawnSlingshotImpact(g_SlingshotProjectile.position);
         g_SlingshotProjectile.is_active = false;
+    }
+}
+
+static void CheckSwordEnemyCollisions(float delta_time)
+{
+    if (!g_PlayerStateMachine.IsAttacking())
+    {
+        g_SwordAttackHitActive = false;
+        return;
+    }
+
+    if (g_SwordAttackHitCooldown > 0.0f)
+    {
+        g_SwordAttackHitCooldown = std::max(0.0f, g_SwordAttackHitCooldown - delta_time);
+        return;
+    }
+
+    const float attack_progress = 1.0f - (g_PlayerStateMachine.GetAttackTimer());
+    const float hit_window_start = 0.05f;
+    const float hit_window_end = 0.70f;
+
+    if (attack_progress < hit_window_start || attack_progress > hit_window_end)
+    {
+        g_SwordAttackHitActive = false;
+        return;
+    }
+
+    g_SwordAttackHitActive = true;
+
+    const float forward_x = -std::sin(g_PlayerYaw);
+    const float forward_z = -std::cos(g_PlayerYaw);
+
+    const float sword_reach = 1.4f;
+    const float sword_half_reach = sword_reach * 0.5f;
+    const float sword_width = 0.8f;
+    const float sword_height = 1.2f;
+
+    float center_x = g_PlayerCubePosition.x + forward_x * sword_half_reach;
+    float center_y = g_PlayerCubePosition.y + 0.8f;
+    float center_z = g_PlayerCubePosition.z + forward_z * sword_half_reach;
+
+    glm::vec4 sword_center(center_x, center_y, center_z, 1.0f);
+
+    float dx = std::fabs(forward_x);
+    float dz = std::fabs(forward_z);
+
+    glm::vec4 sword_half_extents(
+        dx * sword_half_reach + dz * sword_width,
+        sword_height,
+        dz * sword_half_reach + dx * sword_width,
+        0.0f
+    );
+
+    const int hit_index = QuerySwordHitEnemy(sword_center, sword_half_extents);
+    if (hit_index >= 0)
+    {
+        if (hit_index < (int)g_SwordHitEnemies.size() && !g_SwordHitEnemies[hit_index])
+        {
+            ApplyPlayerProjectileDamageToEnemy(hit_index, g_SwordDamage);
+            g_SwordHitEnemies[hit_index] = true;
+            g_SwordAttackHitCooldown = 0.2f;
+            printf("[COMBATE] Espada atingiu inimigo %d! Dano: %d\n", hit_index, g_SwordDamage);
+        }
     }
 }
 
@@ -2395,6 +2463,14 @@ int main()
                                     g_IsClimbingAVine, g_IsClimbingALadder,
                                     g_PlayerOnGround, delta_time);
 
+        if (g_PlayerStateMachine.IsAttacking() && g_PlayerStateMachine.GetPreviousState() != PlayerState::ATTACKING)
+        {
+            g_SwordHitEnemies.clear();
+            g_SwordHitEnemies.resize(GetEnemyCount(), false);
+            g_SwordAttackHitActive = true;
+            g_SwordAttackHitCooldown = 0.0f;
+        }
+
         // Consome input de ataque (single-shot)
         if (g_AttackPressed && g_PlayerStateMachine.GetCurrentState() == PlayerState::ATTACKING) {
             g_AttackPressed = false;
@@ -2415,6 +2491,7 @@ int main()
 
         UpdateEnemies(delta_time, enemy_update_context);
         UpdateEnemyProjectiles(delta_time, enemy_update_context);
+        CheckSwordEnemyCollisions(delta_time);
         UpdateParticles(delta_time);
 
         // Aqui executamos as operações de renderização

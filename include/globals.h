@@ -27,6 +27,12 @@ extern bool g_IsClimbingALadder;
 extern bool g_CollidedWithAVine;
 extern bool g_CollidedWithALadder;
 
+// Sistema de combate com espada
+extern bool  g_SwordAttackHitActive;
+extern float g_SwordAttackHitCooldown;
+extern std::vector<bool> g_SwordHitEnemies;
+extern int   g_SwordDamage;
+
 // Debug drawing
 extern bool g_ShowDebugHitboxes;
 extern bool g_ShowPlayerCoords;

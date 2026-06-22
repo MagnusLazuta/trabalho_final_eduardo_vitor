@@ -28,6 +28,7 @@ public:
     bool IsAttacking() const { return m_currentState == PlayerState::ATTACKING; }
     bool IsDefending() const { return m_currentState == PlayerState::DEFENDING; }
     bool IsJumping()    const { return m_currentState == PlayerState::JUMPING; }
+    float GetAttackTimer() const { return m_attackTimer / ATTACK_DURATION; }
 
     void SetWalkSpeed(float speed) { m_walkSpeed = speed; }
     void SetRunSpeed(float speed)  { m_runSpeed  = speed; }
