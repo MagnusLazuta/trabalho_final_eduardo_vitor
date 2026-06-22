@@ -14,9 +14,23 @@ bool g_APressed = false;
 bool g_SPressed = false;
 bool g_DPressed = false;
 bool g_SpacePressed = false;
+bool g_ShiftPressed = false;
+bool g_AttackPressed = false;
+bool g_DefendPressed = false;
 bool g_IsClimbingAVine = false;
 bool g_IsClimbingALadder = false;
 bool g_CollidedWithAVine = false;
 bool g_CollidedWithALadder = false;
 
+bool  g_SwordAttackHitActive = false;
+float g_SwordAttackHitCooldown = 0.0f;
+std::vector<bool> g_SwordHitEnemies;
+int   g_SwordDamage = 1;
+
 bool g_ShowDebugHitboxes = false;
+bool g_ShowPlayerCoords = false;
+
+PlayerStateMachine g_PlayerStateMachine;
+
+std::vector<DoorInstance> g_Doors;
+bool g_EnterPressed = false;

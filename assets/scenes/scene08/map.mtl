@@ -2,6 +2,7 @@
 # www.blender.org
 
 newmtl dg01_iwa_01_0
+map_Kd ../textures/dg01_iwa_01_0.png
 Ns 250.000000
 Ka 1.000000 1.000000 1.000000
 Kd 0.800000 0.800000 0.800000
@@ -12,6 +13,7 @@ d 1.000000
 illum 2
 
 newmtl dg01_kumo_02_A800
+map_Kd ../textures/dg01_kumo_02_a800.png
 Ns 250.000000
 Ka 1.000000 1.000000 1.000000
 Kd 0.800000 0.800000 0.800000

@@ -148,5 +148,7 @@ void DrawEnemyProjectiles(const EnemyDrawContext &context);
 int QueryEnemyHitByPlayerProjectile(const glm::vec4 &projectile_position, float projectile_radius);
 void ApplyPlayerProjectileDamageToEnemy(int enemy_index, int damage);
 bool QueryBlockingEnemyCollision(const glm::vec4 &center, const glm::vec4 &half_extents);
+int QuerySwordHitEnemy(const glm::vec4 &sword_box_center, const glm::vec4 &sword_box_half_extents);
+std::size_t GetEnemyCount();
 
 #endif // _ENEMIES_H

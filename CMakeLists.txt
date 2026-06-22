@@ -15,6 +15,8 @@ set(SOURCES
   src/glad.c
   src/globals.cpp
   src/movement.cpp
+  src/AssimpModelLoader.cpp
+  src/PlayerState.cpp
   src/enemies.cpp
   src/effects.cpp
 )
@@ -23,7 +25,7 @@ cmake_minimum_required(VERSION 3.5.0)
 
 project(LAB_FCG VERSION 1.0.0)
 
-set(CMAKE_CXX_STANDARD          11)
+set(CMAKE_CXX_STANDARD          17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS        OFF)
 
@@ -126,12 +128,14 @@ elseif(UNIX)
     ${CMAKE_DL_LIBS}
     ${MATH_LIBRARY}
     ${PROJECT_SOURCE_DIR}/lib-linux/libglfw3.a
+    ${PROJECT_SOURCE_DIR}/lib-assimp/libassimp.a
     ${CMAKE_THREAD_LIBS_INIT}
     ${OPENGL_LIBRARIES}
     ${X11_LIBRARIES}
     ${X11_Xrandr_LIB}
     ${X11_Xcursor_LIB}
     ${X11_Xinerama_LIB}
+    z
   )
 
 endif()

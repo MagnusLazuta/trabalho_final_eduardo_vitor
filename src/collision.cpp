@@ -384,3 +384,24 @@ bool IsCollidingWithTypeObb(const CollisionOBB &obb, const std::vector<Collision
     }
     return false;
 }
+
+int FindDoorIndexByBBox(const glm::vec4 &bbox_center, const std::vector<DoorInstance> &doors)
+{
+    for (size_t i = 0; i < doors.size(); ++i)
+    {
+        float dx = doors[i].bbox_center.x - bbox_center.x;
+        float dy = doors[i].bbox_center.y - bbox_center.y;
+        float dz = doors[i].bbox_center.z - bbox_center.z;
+        if (dx * dx + dy * dy + dz * dz < 0.01f)
+            return (int)i;
+    }
+    return -1;
+}
+
+bool BBoxOverlap(const glm::vec4 &a_min, const glm::vec4 &a_max,
+                 const glm::vec4 &b_min, const glm::vec4 &b_max)
+{
+    return (a_min.x <= b_max.x && a_max.x >= b_min.x) &&
+           (a_min.y <= b_max.y && a_max.y >= b_min.y) &&
+           (a_min.z <= b_max.z && a_max.z >= b_min.z);
+}

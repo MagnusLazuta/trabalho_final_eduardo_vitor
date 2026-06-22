@@ -2,6 +2,7 @@
 # www.blender.org
 
 newmtl dg01_kabe_00_0
+map_Kd ../textures/dg01_kabe_00_0.png
 Ns 250.000000
 Ka 1.000000 1.000000 1.000000
 Kd 0.800000 0.800000 0.800000
@@ -12,6 +13,7 @@ d 1.000000
 illum 2
 
 newmtl dg01_ki_03_A800
+map_Kd ../textures/dg01_ki_03_a800.png
 Ns 250.000000
 Ka 1.000000 1.000000 1.000000
 Kd 0.800000 0.800000 0.800000
@@ -22,6 +24,7 @@ d 1.000000
 illum 2
 
 newmtl dg01_kiri_03_D200
+map_Kd ../textures/dg01_kiri_03_d200.png
 Ns 250.000000
 Ka 1.000000 1.000000 1.000000
 Kd 0.800000 0.800000 0.800000
@@ -32,6 +35,7 @@ d 1.000000
 illum 2
 
 newmtl dg01_kumo_02_17A00
+map_Kd ../textures/dg01_kumo_02_17a00.png
 Ns 250.000000
 Ka 1.000000 1.000000 1.000000
 Kd 0.800000 0.800000 0.800000
@@ -42,6 +46,7 @@ d 1.000000
 illum 2
 
 newmtl dg01_syok_01_2CA00
+map_Kd ../textures/dg01_syok_01_2ca00.png
 Ns 250.000000
 Ka 1.000000 1.000000 1.000000
 Kd 0.800000 0.800000 0.800000
@@ -52,6 +57,7 @@ d 1.000000
 illum 2
 
 newmtl dg01_tuta_01_31E00
+map_Kd ../textures/dg01_tuta_01_31e00.png
 Ns 250.000000
 Ka 1.000000 1.000000 1.000000
 Kd 0.800000 0.800000 0.800000
@@ -62,6 +68,7 @@ d 1.000000
 illum 2
 
 newmtl dg01_yuka_00_46E00
+map_Kd ../textures/dg01_yuka_00_46e00.png
 Ns 250.000000
 Ka 1.000000 1.000000 1.000000
 Kd 0.800000 0.800000 0.800000

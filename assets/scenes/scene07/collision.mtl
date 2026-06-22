@@ -1,0 +1,112 @@
+# Blender 4.0.2 MTL File: 'None'
+# www.blender.org
+
+newmtl dg01_iwa_01_0.001
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_iwa_01_0.png
+
+newmtl dg01_kabe_04_A800.001
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_kabe_04_a800.png
+
+newmtl dg01_kabe_08_FC00.004
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_kabe_08_fc00.png
+
+newmtl dg01_kabe_09_2_1A400.001
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_kabe_09_2_1a400.png
+
+newmtl dg01_kabe_10_2_1C400.001
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_kabe_10_2_1c400.png
+
+newmtl dg01_kiri_04_1E400.001
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_kiri_04_1e400.png
+
+newmtl dg01_kumo_02_23800.001
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_kumo_02_23800.png
+
+newmtl dg01_ten_01_38800.001
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_ten_01_38800.png
+
+newmtl dg01_tuta_01_k__3B200.001
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_tuta_01_k__3b200.png
+
+newmtl dg01_yuka_04_3F200.001
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_yuka_04_3f200.png
+
+newmtl dg01_yuka_06_49A00.001
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_yuka_06_49a00.png
