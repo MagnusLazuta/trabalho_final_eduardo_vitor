@@ -23,13 +23,9 @@ uniform mat4 projection;
 #define PLAYER_CUBE 4
 #define PROJECTILE 5
 #define DEBUG_CUBE 6
-<<<<<<< HEAD
 #define PLAYER 7
 #define ENEMY 8
-=======
-#define ENEMY 7
-#define EFFECT 8
->>>>>>> main
+#define EFFECT 9
 uniform int object_id;
 uniform int cube_colliding;
 uniform vec4 debug_color;
@@ -189,15 +185,12 @@ void main()
     else if (color.a < 0.5)
         discard;
 
-<<<<<<< HEAD
     // Forcamos alpha = 1 para evitar halos brancos
     color.a = 1.0;
-=======
     // Forcamos alpha = 1 para evitar halos brancos (fringing) nas bordas
     // provocados pela interpolacao linear com o fundo transparente.
     if (object_id != DEBUG_CUBE && object_id != EFFECT)
         color.a = 1.0;
->>>>>>> main
 
     // Cor final com correcao gamma
     color.rgb = pow(color.rgb, vec3(1.0,1.0,1.0)/2.2);
