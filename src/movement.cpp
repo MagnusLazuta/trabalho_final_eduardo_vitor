@@ -5,24 +5,30 @@
 #include <cmath>
 
 #include "collision.h"
-#include "types.h"
 #include "globals.h"
+#include "types.h"
+
+bool QueryBlockingEnemyCollision(const glm::vec4 &center, const glm::vec4 &half_extents);
 
 const float gravity    = -9.8f;
 const float jump_speed =  4.0f;
-const float step_height = 0.20f;   // altura máxima de degrau
-const float step_subdiv = 0.04f;   // incremento de subida (suavidade)
+const float step_height = 0.20f;
+const float step_subdiv = 0.04f;
 
-// Helper: testa OBB contra cenário, retorna true se LIVRE (não colide com SOLID/DOOR)
+// Helper: testa OBB contra cenário, retorna true se LIVRE
+// (não colide com SOLID/DOOR/WATER — água é tratada como sólido)
 static bool IsPositionFree(const glm::vec4 &pos, const glm::vec4 &halfExt, float yaw)
 {
     CollisionOBB obb = {pos, halfExt, yaw};
     CollisionShapeType col = CollidesWithScenarioObb(obb, g_ScenarioCollisionShapes);
-    return (col != CollisionShapeType::SOLID && col != CollisionShapeType::DOOR);
+    if (col == CollisionShapeType::SOLID || col == CollisionShapeType::DOOR || col == CollisionShapeType::WATER)
+        return false;
+    if (QueryBlockingEnemyCollision(pos, halfExt))
+        return false;
+    return true;
 }
 
 // Tenta movimento horizontal com step climbing incremental
-// Retorna true e atualiza pos se conseguiu (possivelmente com elevação)
 static bool TryMoveHorizontal(glm::vec4 &pos, float delta, int axis,
                                const glm::vec4 &halfExt, float yaw, float margin)
 {
@@ -35,7 +41,6 @@ static bool TryMoveHorizontal(glm::vec4 &pos, float delta, int axis,
         return true;
     }
 
-    // Sobe incrementalmente: testa degraus de step_subdiv em step_subdiv
     for (float lifted = step_subdiv; lifted <= step_height + 0.001f; lifted += step_subdiv) {
         glm::vec4 step = test;
         step.y += lifted;
@@ -96,7 +101,6 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
 
         if (g_WPressed) move_input += 1.0f;
         if (g_SPressed) move_input -= 1.0f;
-
         horizontal_move = player_forward * (move_input * move_speed * delta_time);
 
         g_PlayerVerticalVelocity += gravity * delta_time;
@@ -113,15 +117,15 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     glm::vec4 h_half_extents = g_PlayerCubeHalfExtents;
     h_half_extents.y -= horizontal_test_margin / 2.0f;
 
-    // --- Movimento X (com step climbing incremental) ---
+    // --- Movimento X ---
     TryMoveHorizontal(updated_position, horizontal_move.x, 0,
                       h_half_extents, g_PlayerYaw, horizontal_test_margin);
 
-    // --- Movimento Z (com step climbing incremental) ---
+    // --- Movimento Z ---
     TryMoveHorizontal(updated_position, horizontal_move.z, 2,
                       h_half_extents, g_PlayerYaw, horizontal_test_margin);
 
-    // --- Movimento Y (gravidade / pulo) ---
+    // --- Movimento Y ---
     glm::vec4 test_pos_y = updated_position;
     test_pos_y.y += vertical_move_amount;
     
@@ -146,7 +150,7 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     
     CollisionOBB real_obb = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
     CollisionShapeType real_col = CollidesWithScenarioObb(real_obb, g_ScenarioCollisionShapes);
-    g_PlayerCubeColliding = (real_col == CollisionShapeType::SOLID || real_col == CollisionShapeType::DOOR);
+    g_PlayerCubeColliding = (real_col == CollisionShapeType::SOLID || real_col == CollisionShapeType::DOOR || real_col == CollisionShapeType::WATER);
 
     if (g_IsClimbingAVine && !g_CollidedWithAVine) g_IsClimbingAVine = false;
     if (g_IsClimbingALadder && !g_CollidedWithALadder) g_IsClimbingALadder = false;

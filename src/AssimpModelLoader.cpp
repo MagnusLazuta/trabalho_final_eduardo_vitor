@@ -514,6 +514,14 @@ unsigned int AssimpModelLoader::FindScalingKey(float animationTime, const Assimp
 
 void AssimpModelLoader::ReadNodeHierarchy(float animationTime, aiNode* node, const glm::mat4& parentTransform, int depth) {
     const char* nodeNameCStr = node->mName.C_Str();
+    std::string nodeNameStr(nodeNameCStr);
+    
+    // Nós _$AssimpFbx$_* são pré-transformações baking do FBX (rotação/escala/translação
+    // aplicadas antes do bone). Elas já estão embutidas nas offset matrices dos bones.
+    // Animacoes do Mixamo nao possuem esses nós, então ao aplicá-las, essas
+    // pré-transformações distorcem o esqueleto (pernas para cima, corpo contorcido).
+    // Solução: ignorar esses nós (transform = identidade).
+    bool isAssimpFbxPreTransform = (nodeNameStr.find("_$AssimpFbx$_") != std::string::npos);
     
     // Converte aiMatrix4x4 (row-major) para glm::mat4 (column-major)
     glm::mat4 nodeTransformation(
@@ -523,7 +531,14 @@ void AssimpModelLoader::ReadNodeHierarchy(float animationTime, aiNode* node, con
         node->mTransformation.a4, node->mTransformation.b4, node->mTransformation.c4, node->mTransformation.d4
     );
     
-    if (m_currentAnimation >= 0 && m_currentAnimation < (int)m_animations.size() 
+    // Zera transform de nós _$AssimpFbx$_* para evitar distorção
+    if (isAssimpFbxPreTransform) {
+        nodeTransformation = glm::mat4(1.0f);
+    }
+    
+    // Só busca canal de animação para nós que NÃO são _$AssimpFbx$_*
+    // (esses nós são pré-transforms do FBX e não devem ser animados)
+    if (!isAssimpFbxPreTransform && m_currentAnimation >= 0 && m_currentAnimation < (int)m_animations.size() 
         && m_currentAnimation < (int)m_channelLookup.size()) {
         const AssimpAnimation& animation = m_animations[m_currentAnimation];
         const auto& lookup = m_channelLookup[m_currentAnimation];

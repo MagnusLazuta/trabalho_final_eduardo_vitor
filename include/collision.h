@@ -75,6 +75,8 @@ bool TriangleIntersectsAabb(const Triangle &triangle, const glm::vec4 &box_cente
 
 bool TriangleIntersectsObb(const Triangle &triangle, const CollisionOBB &obb);
 
+CollisionAABB ComputeObbAabb(const CollisionOBB &obb);
+
 static bool OverlapOnAxis(
     const glm::vec4 &v0,
     const glm::vec4 &v1,
