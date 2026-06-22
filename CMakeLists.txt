@@ -18,6 +18,7 @@ set(SOURCES
   src/AssimpModelLoader.cpp
   src/PlayerState.cpp
   src/enemies.cpp
+  src/effects.cpp
 )
 
 cmake_minimum_required(VERSION 3.5.0)
