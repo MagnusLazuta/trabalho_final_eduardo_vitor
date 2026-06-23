@@ -1,0 +1,17 @@
+{
+  "objects": [
+    {
+      "model": "door.obj",
+      "type": "DOOR",
+      "position": [0, 0, 0],
+      "rotation": [0, 0, 0],
+      "scale": [1, 1, 1],
+      "interactive": true,
+      "collision_type": "DOOR",
+      "aabb": {
+        "min": [9.32117, 8.8773, 9.32116],
+        "max": [10.564, 11.0966, 10.564]
+      }
+    }
+  ]
+}

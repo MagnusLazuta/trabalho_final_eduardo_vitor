@@ -243,6 +243,36 @@ struct ScenePart
     std::vector<size_t> adjacent_indices;            // Indices das cenas adjacentes
 };
 
+// Estrutura que representa uma instância de objeto reutilizável (carregada do JSON)
+struct SceneObjectInstance
+{
+    std::string model_path;       // "shared/door.obj"
+    std::string type;             // "DOOR"
+    glm::vec3 position;
+    glm::vec3 rotation;           // graus
+    glm::vec3 scale;
+    bool interactive;
+    std::string collision_type;
+    glm::vec4 aabb_min;           // pré-computada ou calculada em runtime
+    glm::vec4 aabb_max;
+    bool has_aabb;                // se AABB foi carregada ou computada
+};
+
+// Cache de modelos OBJ carregados (load once, draw many)
+static std::map<std::string, ObjModel*> g_ObjModelCache;
+// Instâncias de objetos por cena
+static std::map<int, std::vector<SceneObjectInstance>> g_SceneObjectInstances;
+// Textura padrão para objetos do JSON
+static GLuint g_DefaultObjectTextureID = 0;
+
+// Funções para carregar/salvar objects.json
+std::vector<SceneObjectInstance> LoadSceneObjectInstances(int scene_idx);
+void SaveAabbToSceneJSON(int scene_idx, int object_index,
+                         const glm::vec4& aabb_min, const glm::vec4& aabb_max);
+ObjModel* LoadOrGetCachedObjModel(const std::string& model_name);
+void AutoComputeAABB(SceneObjectInstance& inst);
+CollisionShape BuildCollisionShapeFromInstance(const SceneObjectInstance& inst);
+
 std::vector<ScenePart> g_SceneParts;
 std::vector<size_t> g_CurrentActiveSceneIndices;
 GLuint g_DefaultGrayTextureID = 0;
@@ -835,6 +865,355 @@ static std::string ResolveScene00Path(const char *relative_from_bin, const char 
         return std::string(relative_from_root);
 
     return std::string(relative_from_bin);
+}
+
+// ============================================================================
+// Funções para objects.json (carregar, salvar, auto-compute AABB)
+// ============================================================================
+
+// Helper: Lê texto de arquivo
+static std::string LoadTextFileContent(const std::string& path)
+{
+    std::ifstream file(path.c_str());
+    if (!file.is_open())
+        return std::string();
+    return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+}
+
+// Helper: Encontra delimiter correspondente em JSON
+static std::size_t FindMatchingJSONDelimiter(const std::string& text, std::size_t open_pos, char open_char, char close_char)
+{
+    if (open_pos == std::string::npos || open_pos >= text.size() || text[open_pos] != open_char)
+        return std::string::npos;
+    int depth = 0;
+    for (std::size_t i = open_pos; i < text.size(); ++i)
+    {
+        if (text[i] == open_char) ++depth;
+        else if (text[i] == close_char) { --depth; if (depth == 0) return i; }
+    }
+    return std::string::npos;
+}
+
+// Helper: Extrai valor float de uma string JSON
+static float ExtractJSONFloat(const std::string& json, const std::string& key, std::size_t search_from = 0)
+{
+    std::size_t key_pos = json.find("\"" + key + "\"", search_from);
+    if (key_pos == std::string::npos) return 0.0f;
+    std::size_t colon_pos = json.find(':', key_pos);
+    if (colon_pos == std::string::npos) return 0.0f;
+    return std::stof(json.substr(colon_pos + 1), nullptr);
+}
+
+// Helper: Extrai array [x,y,z] de uma string JSON
+static glm::vec3 ExtractJSONVec3(const std::string& json, const std::string& key, std::size_t search_from = 0)
+{
+    std::size_t key_pos = json.find("\"" + key + "\"", search_from);
+    if (key_pos == std::string::npos) return glm::vec3(0.0f);
+    std::size_t bracket_pos = json.find('[', key_pos);
+    if (bracket_pos == std::string::npos) return glm::vec3(0.0f);
+    std::size_t bracket_end = json.find(']', bracket_pos);
+    if (bracket_end == std::string::npos) return glm::vec3(0.0f);
+    std::string values = json.substr(bracket_pos + 1, bracket_end - bracket_pos - 1);
+    std::replace(values.begin(), values.end(), ',', ' ');
+    std::stringstream ss(values);
+    float x, y, z;
+    if (!(ss >> x >> y >> z)) return glm::vec3(0.0f);
+    return glm::vec3(x, y, z);
+}
+
+// Helper: Extrai string de uma string JSON
+static std::string ExtractJSONString(const std::string& json, const std::string& key, std::size_t search_from = 0)
+{
+    std::size_t key_pos = json.find("\"" + key + "\"", search_from);
+    if (key_pos == std::string::npos) return "";
+    std::size_t first_quote = json.find('"', key_pos + key.size() + 2);
+    if (first_quote == std::string::npos) return "";
+    std::size_t second_quote = json.find('"', first_quote + 1);
+    if (second_quote == std::string::npos) return "";
+    return json.substr(first_quote + 1, second_quote - first_quote - 1);
+}
+
+// Helper: Extrai bool de uma string JSON
+static bool ExtractJSONBool(const std::string& json, const std::string& key, std::size_t search_from = 0)
+{
+    std::size_t key_pos = json.find("\"" + key + "\"", search_from);
+    if (key_pos == std::string::npos) return false;
+    std::size_t colon_pos = json.find(':', key_pos);
+    if (colon_pos == std::string::npos) return false;
+    std::string value = json.substr(colon_pos + 1, 10);
+    // Remove espaços em branco
+    value.erase(0, value.find_first_not_of(" \t\n\r"));
+    return value.substr(0, 4) == "true";
+}
+
+// Carrega instâncias de objetos de objects.json para uma cena
+std::vector<SceneObjectInstance> LoadSceneObjectInstances(int scene_idx)
+{
+    std::vector<SceneObjectInstance> instances;
+
+    char buf[256], buf_bin[256];
+    snprintf(buf, sizeof(buf), "assets/scenes/scene%02d/objects.json", scene_idx);
+    snprintf(buf_bin, sizeof(buf_bin), "../../assets/scenes/scene%02d/objects.json", scene_idx);
+    const std::string json_path = ResolveScene00Path(buf_bin, buf);
+
+    const std::string json_text = LoadTextFileContent(json_path);
+    if (json_text.empty())
+    {
+        printf("[JSON] objects.json para scene%02d vazio ou nao encontrado\n", scene_idx);
+        return instances;
+    }
+
+    // Encontra o array "objects"
+    std::size_t objects_key_pos = json_text.find("\"objects\"");
+    if (objects_key_pos == std::string::npos)
+    {
+        printf("[JSON] Campo 'objects' nao encontrado em scene%02d\n", scene_idx);
+        return instances;
+    }
+
+    std::size_t array_start = json_text.find('[', objects_key_pos);
+    std::size_t array_end = FindMatchingJSONDelimiter(json_text, array_start, '[', ']');
+    if (array_start == std::string::npos || array_end == std::string::npos)
+    {
+        printf("[JSON] Array 'objects' invalido em scene%02d\n", scene_idx);
+        return instances;
+    }
+
+    std::string objects_block = json_text.substr(array_start + 1, array_end - array_start - 1);
+
+    // Para cada objeto no array, extrai os campos
+    std::size_t entry_pos = 0;
+    int object_count = 0;
+    while (true)
+    {
+        std::size_t model_pos = objects_block.find("\"model\"", entry_pos);
+        if (model_pos == std::string::npos) break;
+
+        std::size_t brace_start = objects_block.rfind('{', model_pos);
+        if (brace_start == std::string::npos || brace_start < entry_pos) { entry_pos = model_pos + 7; continue; }
+        std::size_t brace_end = FindMatchingJSONDelimiter(objects_block, brace_start, '{', '}');
+        if (brace_end == std::string::npos) { entry_pos = model_pos + 7; continue; }
+
+        std::string entry = objects_block.substr(brace_start, brace_end - brace_start + 1);
+
+        SceneObjectInstance inst;
+        inst.model_path = ExtractJSONString(entry, "model");
+        inst.type = ExtractJSONString(entry, "type");
+        inst.position = ExtractJSONVec3(entry, "position");
+        inst.rotation = ExtractJSONVec3(entry, "rotation");
+        inst.scale = ExtractJSONVec3(entry, "scale");
+        inst.interactive = ExtractJSONBool(entry, "interactive");
+        inst.collision_type = ExtractJSONString(entry, "collision_type");
+
+        // Verifica se tem AABB pre-computada
+        std::size_t aabb_pos = entry.find("\"aabb\"");
+        if (aabb_pos != std::string::npos)
+        {
+            inst.aabb_min = glm::vec4(ExtractJSONVec3(entry, "min", aabb_pos), 1.0f);
+            inst.aabb_max = glm::vec4(ExtractJSONVec3(entry, "max", aabb_pos), 1.0f);
+            inst.has_aabb = true;
+        }
+        else
+        {
+            inst.aabb_min = glm::vec4(0.0f);
+            inst.aabb_max = glm::vec4(0.0f);
+            inst.has_aabb = false;
+        }
+
+        instances.push_back(inst);
+        object_count++;
+        entry_pos = brace_end + 1;
+    }
+
+    printf("[JSON] Carregados %d objetos de objects.json para scene%02d\n", object_count, scene_idx);
+    return instances;
+}
+
+// Salva AABB de volta no objects.json (reescreve o arquivo completo)
+void SaveAabbToSceneJSON(int scene_idx, int object_index,
+                         const glm::vec4& aabb_min, const glm::vec4& aabb_max)
+{
+    char buf[256], buf_bin[256];
+    snprintf(buf, sizeof(buf), "assets/scenes/scene%02d/objects.json", scene_idx);
+    snprintf(buf_bin, sizeof(buf_bin), "../../assets/scenes/scene%02d/objects.json", scene_idx);
+    const std::string json_path = ResolveScene00Path(buf_bin, buf);
+
+    // Lê todos os objetos atuais
+    std::vector<SceneObjectInstance> instances = LoadSceneObjectInstances(scene_idx);
+    if (object_index < 0 || object_index >= (int)instances.size()) return;
+
+    // Atualiza a AABB
+    instances[object_index].aabb_min = aabb_min;
+    instances[object_index].aabb_max = aabb_max;
+    instances[object_index].has_aabb = true;
+
+    // Reescreve o JSON
+    std::ofstream out_file(json_path);
+    if (!out_file.is_open()) return;
+
+    out_file << "{\n  \"objects\": [\n";
+    for (size_t i = 0; i < instances.size(); ++i)
+    {
+        const auto& inst = instances[i];
+        out_file << "    {\n";
+        out_file << "      \"model\": \"" << inst.model_path << "\",\n";
+        out_file << "      \"type\": \"" << inst.type << "\",\n";
+        out_file << "      \"position\": [" << inst.position.x << ", " << inst.position.y << ", " << inst.position.z << "],\n";
+        out_file << "      \"rotation\": [" << inst.rotation.x << ", " << inst.rotation.y << ", " << inst.rotation.z << "],\n";
+        out_file << "      \"scale\": [" << inst.scale.x << ", " << inst.scale.y << ", " << inst.scale.z << "],\n";
+        out_file << "      \"interactive\": " << (inst.interactive ? "true" : "false") << ",\n";
+        out_file << "      \"collision_type\": \"" << inst.collision_type << "\",\n";
+        out_file << "      \"aabb\": {\n";
+        out_file << "        \"min\": [" << inst.aabb_min.x << ", " << inst.aabb_min.y << ", " << inst.aabb_min.z << "],\n";
+        out_file << "        \"max\": [" << inst.aabb_max.x << ", " << inst.aabb_max.y << ", " << inst.aabb_max.z << "]\n";
+        out_file << "      }\n";
+        out_file << "    }";
+        if (i < instances.size() - 1) out_file << ",";
+        out_file << "\n";
+    }
+    out_file << "  ]\n}\n";
+
+    out_file.close();
+    printf("[JSON] AABB salva em objects.json para scene%02d, objeto %d\n", scene_idx, object_index);
+}
+
+// Carrega um .obj do cache ou do disco
+ObjModel* LoadOrGetCachedObjModel(const std::string& model_name)
+{
+    auto it = g_ObjModelCache.find(model_name);
+    if (it != g_ObjModelCache.end())
+        return it->second;
+
+    // Resolve o caminho do .obj
+    char buf_bin[256], buf[256];
+    snprintf(buf_bin, sizeof(buf_bin), "../../assets/scenes/shared/%s", model_name.c_str());
+    snprintf(buf, sizeof(buf), "assets/scenes/shared/%s", model_name.c_str());
+    const std::string obj_path = ResolveScene00Path(buf_bin, buf);
+
+    printf("[JSON] Carregando modelo compartilhado: %s\n", obj_path.c_str());
+    ObjModel* model = new ObjModel(obj_path.c_str());
+    ComputeNormals(model);
+    g_ObjModelCache[model_name] = model;
+    return model;
+}
+
+// Auto-compute AABB a partir do .obj + transform
+void AutoComputeAABB(SceneObjectInstance& inst)
+{
+    ObjModel* model = LoadOrGetCachedObjModel(inst.model_path);
+
+    // Calcula bounds do modelo
+    glm::vec4 bbox_min(+std::numeric_limits<float>::infinity());
+    glm::vec4 bbox_max(-std::numeric_limits<float>::infinity());
+    bbox_min.w = 1.0f; bbox_max.w = 1.0f;
+
+    for (size_t i = 0; i < model->attrib.vertices.size() / 3; ++i)
+    {
+        glm::vec4 p(
+            model->attrib.vertices[3 * i + 0],
+            model->attrib.vertices[3 * i + 1],
+            model->attrib.vertices[3 * i + 2],
+            1.0f);
+
+        // Aplica escala
+        p = glm::vec4(p.x * inst.scale.x, p.y * inst.scale.y, p.z * inst.scale.z, 1.0f);
+
+        // Aplica rotação (Y, X, Z)
+        float rad_y = glm::radians(inst.rotation.y);
+        float rad_x = glm::radians(inst.rotation.x);
+        float rad_z = glm::radians(inst.rotation.z);
+
+        // Rotação Z
+        float x1 = p.x * cosf(rad_z) - p.y * sinf(rad_z);
+        float y1 = p.x * sinf(rad_z) + p.y * cosf(rad_z);
+        p.x = x1; p.y = y1;
+
+        // Rotação X
+        float y2 = p.y * cosf(rad_x) - p.z * sinf(rad_x);
+        float z2 = p.y * sinf(rad_x) + p.z * cosf(rad_x);
+        p.y = y2; p.z = z2;
+
+        // Rotação Y
+        float x3 = p.x * cosf(rad_y) + p.z * sinf(rad_y);
+        float z3 = -p.x * sinf(rad_y) + p.z * cosf(rad_y);
+        p.x = x3; p.z = z3;
+
+        // Aplica translação
+        p.x += inst.position.x;
+        p.y += inst.position.y;
+        p.z += inst.position.z;
+
+        bbox_min.x = std::min(bbox_min.x, p.x);
+        bbox_min.y = std::min(bbox_min.y, p.y);
+        bbox_min.z = std::min(bbox_min.z, p.z);
+        bbox_max.x = std::max(bbox_max.x, p.x);
+        bbox_max.y = std::max(bbox_max.y, p.y);
+        bbox_max.z = std::max(bbox_max.z, p.z);
+    }
+
+    inst.aabb_min = bbox_min;
+    inst.aabb_max = bbox_max;
+    inst.has_aabb = true;
+
+    printf("[JSON] AABB auto-computada: min=(%.2f, %.2f, %.2f) max=(%.2f, %.2f, %.2f)\n",
+           bbox_min.x, bbox_min.y, bbox_min.z, bbox_max.x, bbox_max.y, bbox_max.z);
+}
+
+// Constrói CollisionShape a partir de uma instância
+CollisionShape BuildCollisionShapeFromInstance(const SceneObjectInstance& inst)
+{
+    CollisionShape shape;
+
+    // Determina o tipo de colisão
+    if (inst.collision_type == "DOOR")
+        shape.type = CollisionShapeType::DOOR;
+    else if (inst.collision_type == "VINES")
+        shape.type = CollisionShapeType::VINES;
+    else if (inst.collision_type == "LADDER")
+        shape.type = CollisionShapeType::LADDER;
+    else if (inst.collision_type == "WATER")
+        shape.type = CollisionShapeType::WATER;
+    else if (inst.collision_type == "NONE")
+        shape.type = CollisionShapeType::NONE;
+    else
+        shape.type = CollisionShapeType::SOLID;
+
+    // Constroi model matrix: T * Ry * Rx * Rz * S
+    glm::mat4 T = Matrix_Translate(inst.position.x, inst.position.y, inst.position.z);
+    glm::mat4 Rx = Matrix_Rotate_X(glm::radians(inst.rotation.x));
+    glm::mat4 Ry = Matrix_Rotate_Y(glm::radians(inst.rotation.y));
+    glm::mat4 Rz = Matrix_Rotate_Z(glm::radians(inst.rotation.z));
+    glm::mat4 S = Matrix_Scale(inst.scale.x, inst.scale.y, inst.scale.z);
+    glm::mat4 model_matrix = T * Ry * Rx * Rz * S;
+
+    // Carrega o .obj e extrai os triângulos reais (não uma caixa AABB fake)
+    ObjModel* obj_model = LoadOrGetCachedObjModel(inst.model_path);
+    if (obj_model && !obj_model->shapes.empty())
+    {
+        std::vector<CollisionShape> temp_shapes;
+        glm::vec4 temp_min, temp_max;
+        BuildCollisionDataIntoVector(obj_model, model_matrix, temp_shapes, temp_min, temp_max);
+
+        // Usa os triângulos reais, mas com o tipo do JSON
+        for (auto& s : temp_shapes)
+        {
+            s.type = shape.type;
+            shape.triangles.insert(shape.triangles.end(), s.triangles.begin(), s.triangles.end());
+            shape.bbox_min.x = std::min(shape.bbox_min.x, s.bbox_min.x);
+            shape.bbox_min.y = std::min(shape.bbox_min.y, s.bbox_min.y);
+            shape.bbox_min.z = std::min(shape.bbox_min.z, s.bbox_min.z);
+            shape.bbox_max.x = std::max(shape.bbox_max.x, s.bbox_max.x);
+            shape.bbox_max.y = std::max(shape.bbox_max.y, s.bbox_max.y);
+            shape.bbox_max.z = std::max(shape.bbox_max.z, s.bbox_max.z);
+        }
+    }
+    else
+    {
+        shape.bbox_min = inst.aabb_min;
+        shape.bbox_max = inst.aabb_max;
+    }
+
+    return shape;
 }
 
 float WrapAnglePi(float angle)
@@ -1891,7 +2270,75 @@ int main()
         g_SceneParts.push_back(part);
     }
 
-    // Coleta todas as portas (DOOR) de todas as cenas
+    // --- Carrega objects.json para cada cena ---
+    printf("\n=== Carregando objects.json ===\n");
+    g_SceneObjectInstances.clear();
+    for (int scene_idx = 0; scene_idx < 12; ++scene_idx)
+    {
+        std::vector<SceneObjectInstance> instances = LoadSceneObjectInstances(scene_idx);
+
+        // Para cada instância, auto-compute AABB se ausente
+        for (size_t i = 0; i < instances.size(); ++i)
+        {
+            if (!instances[i].has_aabb)
+            {
+                printf("[JSON] Objeto '%s' na cena scene%02d sem AABB. Computando...\n",
+                       instances[i].model_path.c_str(), scene_idx);
+                AutoComputeAABB(instances[i]);
+                // Salva de volta no JSON
+                SaveAabbToSceneJSON(scene_idx, (int)i, instances[i].aabb_min, instances[i].aabb_max);
+            }
+
+            // Adiciona como collision shape se tiver collision_type válido
+            if (!instances[i].collision_type.empty() && instances[i].collision_type != "NONE")
+            {
+                CollisionShape shape = BuildCollisionShapeFromInstance(instances[i]);
+                g_SceneParts[scene_idx].collision_shapes.push_back(shape);
+
+                // Atualiza bounds globais
+                g_ScenarioBoundsMin.x = std::min(g_ScenarioBoundsMin.x, shape.bbox_min.x);
+                g_ScenarioBoundsMin.y = std::min(g_ScenarioBoundsMin.y, shape.bbox_min.y);
+                g_ScenarioBoundsMin.z = std::min(g_ScenarioBoundsMin.z, shape.bbox_min.z);
+                g_ScenarioBoundsMax.x = std::max(g_ScenarioBoundsMax.x, shape.bbox_max.x);
+                g_ScenarioBoundsMax.y = std::max(g_ScenarioBoundsMax.y, shape.bbox_max.y);
+                g_ScenarioBoundsMax.z = std::max(g_ScenarioBoundsMax.z, shape.bbox_max.z);
+            }
+        }
+
+        g_SceneObjectInstances[scene_idx] = instances;
+
+        // --- Carrega os modelos dos objetos do JSON no g_VirtualScene ---
+        for (size_t i = 0; i < instances.size(); ++i)
+        {
+            const auto& inst = instances[i];
+            ObjModel* obj_model = LoadOrGetCachedObjModel(inst.model_path);
+            if (!obj_model) continue;
+
+            // Prefixo para evitar colisões de nomes
+            char obj_prefix[128];
+            snprintf(obj_prefix, sizeof(obj_prefix), "scene%02d_json_%zu_", scene_idx, i);
+
+            // Adiciona ao g_VirtualScene
+            std::vector<std::string> original_names;
+            original_names.reserve(obj_model->shapes.size());
+            for (auto& shape : obj_model->shapes)
+            {
+                original_names.push_back(shape.name);
+                shape.name = std::string(obj_prefix) + shape.name;
+            }
+
+            BuildTrianglesAndAddToVirtualScene(obj_model, g_DefaultGrayTextureID);
+
+            // Adiciona nomes à lista de renderização da cena
+            for (auto& [name, obj] : g_VirtualScene)
+            {
+                if (name.compare(0, std::string(obj_prefix).size(), obj_prefix) == 0)
+                    g_SceneParts[scene_idx].render_object_names.push_back(name);
+            }
+        }
+    }
+
+    // Coleta todas as portas (DOOR) de todas as cenas (incluindo do JSON)
     g_Doors.clear();
     for (size_t part_idx = 0; part_idx < g_SceneParts.size(); ++part_idx)
     {
@@ -2800,17 +3247,18 @@ int main()
                 float door_y_offset = 0.0f;
                 if (g_Doors.size() > 0 && g_VirtualScene.find(name) != g_VirtualScene.end())
                 {
-                    const SceneObject &obj = g_VirtualScene[name];
-                    glm::vec4 obj_center = (obj.bbox_min + obj.bbox_max) * 0.5f;
-                    for (const auto &door : g_Doors)
+                    std::string name_str(name);
+                    bool is_door_mesh = (name_str.find("DOOR") != std::string::npos ||
+                                         name_str.find("door") != std::string::npos);
+                    if (is_door_mesh)
                     {
-                        if (door.current_y_offset > 0.01f &&
-                            obj_center.x >= door.bbox_min.x && obj_center.x <= door.bbox_max.x &&
-                            obj_center.y >= door.bbox_min.y && obj_center.y <= door.bbox_max.y &&
-                            obj_center.z >= door.bbox_min.z && obj_center.z <= door.bbox_max.z)
+                        for (const auto &door : g_Doors)
                         {
-                            door_y_offset = door.current_y_offset;
-                            break;
+                            if (door.current_y_offset > 0.01f)
+                            {
+                                door_y_offset = door.current_y_offset;
+                                break;
+                            }
                         }
                     }
                 }
@@ -2830,6 +3278,68 @@ int main()
                 }
             }
         }
+
+        // --- Desenha objetos do objects.json (instâncias reutilizáveis) ---
+        for (size_t idx : g_CurrentActiveSceneIndices)
+        {
+            auto it = g_SceneObjectInstances.find((int)idx);
+            if (it == g_SceneObjectInstances.end()) continue;
+
+            for (size_t i = 0; i < it->second.size(); ++i)
+            {
+                const auto& inst = it->second[i];
+
+                // Carrega o modelo do cache
+                ObjModel* obj_model = LoadOrGetCachedObjModel(inst.model_path);
+                if (!obj_model) continue;
+
+                // Constroi a model matrix: translate * rotate * scale
+                glm::mat4 T = Matrix_Translate(inst.position.x, inst.position.y, inst.position.z);
+                glm::mat4 Rx = Matrix_Rotate_X(glm::radians(inst.rotation.x));
+                glm::mat4 Ry = Matrix_Rotate_Y(glm::radians(inst.rotation.y));
+                glm::mat4 Rz = Matrix_Rotate_Z(glm::radians(inst.rotation.z));
+                glm::mat4 S = Matrix_Scale(inst.scale.x, inst.scale.y, inst.scale.z);
+                glm::mat4 object_model = T * Ry * Rx * Rz * S;
+
+                // Para portas que estão abrindo, aplica offset Y
+                if (inst.type == "DOOR")
+                {
+                    for (const auto& door : g_Doors)
+                    {
+                        if (door.current_y_offset > 0.01f)
+                        {
+                            object_model = Matrix_Translate(0.0f, door.current_y_offset, 0.0f) * object_model;
+                            break;
+                        }
+                    }
+                }
+
+                glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(object_model));
+                glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE,
+                                   glm::value_ptr(glm::transpose(glm::inverse(object_model))));
+                glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
+                glUniform3f(g_object_tint_uniform, 1.0f, 1.0f, 1.0f);
+
+                // Desenha cada shape do modelo
+                char obj_prefix[128];
+                snprintf(obj_prefix, sizeof(obj_prefix), "scene%02d_json_%zu_", (int)idx, i);
+                for (size_t shape = 0; shape < obj_model->shapes.size(); ++shape)
+                {
+                    std::string shape_name = std::string(obj_prefix) + obj_model->shapes[shape].name;
+                    // Remove o prefixo duplicado se já estiver no nome
+                    std::string original_shape_name = obj_model->shapes[shape].name;
+                    if (shape_name.find(original_shape_name) == std::string::npos)
+                        shape_name = std::string(obj_prefix) + original_shape_name;
+
+                    auto virt_it = g_VirtualScene.find(shape_name);
+                    if (virt_it != g_VirtualScene.end())
+                    {
+                        DrawVirtualObject(shape_name.c_str());
+                    }
+                }
+            }
+        }
+
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
         glFrontFace(GL_CCW);
