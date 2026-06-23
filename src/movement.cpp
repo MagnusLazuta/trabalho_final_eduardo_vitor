@@ -16,13 +16,32 @@ const float step_height = 0.20f;
 const float step_subdiv = 0.04f;
 
 // Helper: testa OBB contra cenário, retorna true se LIVRE
-// (não colide com SOLID/DOOR/WATER — água é tratada como sólido)
+// Verifica TODAS as shapes — não para no primeiro hit.
+// Isso é necessário porque CollidesWithScenarioObb retorna apenas o primeiro tipo,
+// mas uma posição pode colidir com VINE e SOLID simultaneamente.
 static bool IsPositionFree(const glm::vec4 &pos, const glm::vec4 &halfExt, float yaw)
 {
     CollisionOBB obb = {pos, halfExt, yaw};
-    CollisionShapeType col = CollidesWithScenarioObb(obb, g_ScenarioCollisionShapes);
-    if (col == CollisionShapeType::SOLID || col == CollisionShapeType::DOOR || col == CollisionShapeType::WATER)
-        return false;
+    const CollisionAABB obb_aabb = ComputeObbAabb(obb);
+
+    for (size_t i = 0; i < g_ScenarioCollisionShapes.size(); ++i)
+    {
+        const CollisionShape &shape = g_ScenarioCollisionShapes[i];
+        if (shape.type != CollisionShapeType::SOLID &&
+            shape.type != CollisionShapeType::DOOR &&
+            shape.type != CollisionShapeType::WATER)
+            continue;
+
+        CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
+        if (!AabbAabbIntersect(obb_aabb, shape_aabb))
+            continue;
+
+        for (size_t t = 0; t < shape.triangles.size(); ++t)
+        {
+            if (TriangleIntersectsObb(shape.triangles[t], obb))
+                return false;
+        }
+    }
     if (QueryBlockingEnemyCollision(pos, halfExt))
         return false;
     return true;
@@ -103,8 +122,9 @@ static bool IsPositionFreeForClimbing(const glm::vec4 &pos, const glm::vec4 &hal
 static bool TryMoveHorizontal(glm::vec4 &pos, float delta, int axis,
                                const glm::vec4 &halfExt, float yaw, float margin)
 {
+    float original_y = pos.y;
+
     glm::vec4 test = pos;
-    test.y += margin / 2.0f;
     (axis == 0 ? test.x : test.z) += delta;
 
     if (IsPositionFreeWalkThrough(test, halfExt, yaw)) {
@@ -114,11 +134,11 @@ static bool TryMoveHorizontal(glm::vec4 &pos, float delta, int axis,
 
     for (float lifted = step_subdiv; lifted <= step_height + 0.001f; lifted += step_subdiv) {
         glm::vec4 step = test;
-        step.y += lifted;
+        step.y = original_y + lifted;
         if (IsPositionFreeWalkThrough(step, halfExt, yaw)) {
             pos.x = step.x;
-            pos.y = step.y;
             pos.z = step.z;
+            pos.y = step.y;
             return true;
         }
     }
@@ -210,9 +230,7 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     // --- Movimento Y ---
     glm::vec4 test_pos_y = updated_position;
     test_pos_y.y += vertical_move_amount;
-    
-    // Durante escalada, ignora colisão com vine/ladder e usa half extents pequenos
-    // para não colidir com a parede ao lado, mas ainda detecta chão/teto SOLID
+
     bool yFree;
     if (g_IsClimbingALadder || g_IsClimbingAVine)
     {
@@ -226,10 +244,6 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     {
         CollisionOBB test_obb = {test_pos_y, g_PlayerCubeHalfExtents, g_PlayerYaw};
         CollisionShapeType block_col = CollidesWithScenarioObb(test_obb, g_ScenarioCollisionShapes);
-        printf("[DOOR DEBUG] Y-BLOCKED! block_type=%d pos=(%.2f,%.2f,%.2f) testY=%.2f vel=%.2f\n",
-               (int)block_col,
-               g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
-               test_pos_y.y, g_PlayerVerticalVelocity);
         if (block_col == CollisionShapeType::DOOR)
         {
             CollisionAABB obb_aabb = ComputeObbAabb(test_obb);
@@ -254,32 +268,33 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     {
         updated_position.y = test_pos_y.y;
         if (!g_IsClimbingALadder && !g_IsClimbingAVine)
-        {
-            if (g_PlayerOnGround)
-            {
-                static int fallDebugCounter = 0;
-                fallDebugCounter++;
-                if (fallDebugCounter % 30 == 0)
-                {
-                    printf("[FALL] Left ground at pos=(%.1f,%.1f,%.1f) vel=%.2f\n",
-                           updated_position.x, updated_position.y, updated_position.z,
-                           g_PlayerVerticalVelocity);
-                }
-            }
             g_PlayerOnGround = false;
-        }
     }
     else
     {
         g_PlayerVerticalVelocity = 0.0f;
-        // Só marca onGround se NÃO estiver escalando
         if (!g_IsClimbingALadder && !g_IsClimbingAVine)
             g_PlayerOnGround = true;
+    }
 
-        if (g_IsClimbingALadder || g_IsClimbingAVine)
+    // Ground snap: se não está no chão e não está pulando/escalando,
+    // tenta puxar o player para baixo até encontrar o chão.
+    // Isso corrige flutuação causada por step climbing e evita cair através do chão.
+    if (!g_IsClimbingALadder && !g_IsClimbingAVine && !g_PlayerOnGround && g_PlayerVerticalVelocity <= 0.0f)
+    {
+        const float max_snap = 0.5f;
+        const float snap_step = 0.02f;
+        for (float snap = snap_step; snap <= max_snap + 0.001f; snap += snap_step)
         {
-            printf("[CLIMB Y-BLOCKED] move=%.3f testY=%.1f curY=%.1f\n",
-                   vertical_move_amount, test_pos_y.y, updated_position.y);
+            glm::vec4 snap_pos = updated_position;
+            snap_pos.y -= snap;
+            if (!IsPositionFree(snap_pos, g_PlayerCubeHalfExtents, g_PlayerYaw))
+            {
+                updated_position.y = snap_pos.y + snap_step;
+                g_PlayerVerticalVelocity = 0.0f;
+                g_PlayerOnGround = true;
+                break;
+            }
         }
     }
 

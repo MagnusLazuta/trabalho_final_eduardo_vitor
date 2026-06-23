@@ -19,6 +19,7 @@ set(SOURCES
   src/PlayerState.cpp
   src/enemies.cpp
   src/effects.cpp
+  src/Attachment.cpp
 )
 
 cmake_minimum_required(VERSION 3.5.0)

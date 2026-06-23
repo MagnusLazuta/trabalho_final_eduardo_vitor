@@ -40,6 +40,7 @@
 #include "effects.h"
 #include "movement.h"
 #include "AssimpModelLoader.h"
+#include "Attachment.h"
 
 GLuint LoadTextureImage(const char *filename); // Função que carrega imagens de textura
 void SplitShapesByMaterial(std::vector<tinyobj::shape_t> *shapes);
@@ -342,9 +343,9 @@ GLint g_is_weapon_uniform;
 
 // Offsets de posicionamento e rotação das armas (valores fixos)
 glm::vec3 g_SwordPositionOffset(-50.0f, -72.0f, 0.0f);
-glm::vec3 g_SwordRotationDeg(300.0f, 345.0f, 105.0f);
+glm::vec3 g_SwordRotationDeg(330.0f, 790.0f, 345.0f);
 glm::vec3 g_ShieldPositionOffset(46.0f, -76.0f, 0.0f);
-glm::vec3 g_ShieldRotationDeg(345.0f, 285.0f, 240.0f);
+glm::vec3 g_ShieldRotationDeg(710.0f, 485.0f, 240.0f);
 
 // Variantes de ataque
 int g_CurrentAttackVariant = 6; // slash (3)
@@ -384,6 +385,10 @@ glm::vec3 g_SwordGripOffset(0.0f); // Offset do punho relativo ao centro
 glm::vec3 g_ShieldGripOffset(0.0f); // Offset do grip relativo ao centro
 float g_SwordModelScale = 1.0f;
 float g_ShieldModelScale = 1.0f;
+
+// Attachments (sistema de anexo de objetos aos ossos)
+ModelAttachment *g_SwordAttachment = nullptr;
+ModelAttachment *g_ShieldAttachment = nullptr;
 
 // Animações
 
@@ -1742,6 +1747,9 @@ int main()
     // funções modernas de OpenGL.
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
+    // Pedimos para a janela iniciar maximizada.
+    glfwWindowHint(GLFW_MAXIMIZED, GL_TRUE);
+
     // Criamos uma janela do sistema operacional, com 800 colunas e 600 linhas
     // de pixels, e com título "INF01047 ...".
     GLFWwindow *window;
@@ -1752,6 +1760,9 @@ int main()
         fprintf(stderr, "ERROR: glfwCreateWindow() failed.\n");
         std::exit(EXIT_FAILURE);
     }
+
+    // Maximizamos a janela para iniciar em tela cheia.
+    glfwMaximizeWindow(window);
 
     // Definimos a função de callback que será chamada sempre que o usuário
     // pressionar alguma tecla do teclado ...
@@ -1856,48 +1867,15 @@ int main()
                 part.render_object_names.push_back(name);
         }
 
-        // Computa AABB da cena a partir dos vertices do map.obj
-        {
-            const float maxval = std::numeric_limits<float>::max();
-            part.bbox_min = glm::vec4(+maxval, +maxval, +maxval, 1.0f);
-            part.bbox_max = glm::vec4(-maxval, -maxval, -maxval, 1.0f);
-            for (size_t v = 0; v < map_model.attrib.vertices.size(); v += 3)
-            {
-                const float vx = map_model.attrib.vertices[v + 0];
-                const float vy = map_model.attrib.vertices[v + 1];
-                const float vz = map_model.attrib.vertices[v + 2];
-                part.bbox_min.x = std::min(part.bbox_min.x, vx);
-                part.bbox_min.y = std::min(part.bbox_min.y, vy);
-                part.bbox_min.z = std::min(part.bbox_min.z, vz);
-                part.bbox_max.x = std::max(part.bbox_max.x, vx);
-                part.bbox_max.y = std::max(part.bbox_max.y, vy);
-                part.bbox_max.z = std::max(part.bbox_max.z, vz);
-            }
-        }
-
-        printf("  Visual AABB: [%.1f,%.1f,%.1f] a [%.1f,%.1f,%.1f]\n",
-               part.bbox_min.x, part.bbox_min.y, part.bbox_min.z,
-               part.bbox_max.x, part.bbox_max.y, part.bbox_max.z);
-
-        // --- Carrega colisao ---
+        // --- Carrega colisao e usa AABB apenas do collision.obj ---
         {
             ObjModel col_model(col_path.c_str());
             ComputeNormals(&col_model);
-            glm::vec4 col_bbox_min, col_bbox_max;
             BuildCollisionDataIntoVector(&col_model, Matrix_Identity(),
-                part.collision_shapes, col_bbox_min, col_bbox_max);
-
-            // USA AABB da colisao para deteccao de cenas (collision.obj pode estar
-            // em posicao diferente do map.obj). Faz union com AABB do mapa.
-            part.bbox_min.x = std::min(part.bbox_min.x, col_bbox_min.x);
-            part.bbox_min.y = std::min(part.bbox_min.y, col_bbox_min.y);
-            part.bbox_min.z = std::min(part.bbox_min.z, col_bbox_min.z);
-            part.bbox_max.x = std::max(part.bbox_max.x, col_bbox_max.x);
-            part.bbox_max.y = std::max(part.bbox_max.y, col_bbox_max.y);
-            part.bbox_max.z = std::max(part.bbox_max.z, col_bbox_max.z);
+                part.collision_shapes, part.bbox_min, part.bbox_max);
         }
 
-        printf("  AABB (union): [%.1f,%.1f,%.1f] a [%.1f,%.1f,%.1f]\n",
+        printf("  Collision AABB: [%.1f,%.1f,%.1f] a [%.1f,%.1f,%.1f]\n",
                part.bbox_min.x, part.bbox_min.y, part.bbox_min.z,
                part.bbox_max.x, part.bbox_max.y, part.bbox_max.z);
         printf("  Shapes de colisao: %zu, objetos visuais: %zu\n",
@@ -2147,6 +2125,21 @@ int main()
             g_ShieldObjectNames.push_back(name);
     }
     printf("Shield loaded: %zu objects, scale=%.4f\n", g_ShieldObjectNames.size(), g_ShieldModelScale);
+
+    // Cria attachments para espada e escudo
+    InitAttachments();
+    g_SwordAttachment = CreateAttachment("sword", "mixamorig:RightHand", g_SwordObjectNames);
+    if (g_SwordAttachment)
+    {
+        g_SwordAttachment->localPosition = g_SwordPositionOffset;
+        g_SwordAttachment->localRotationDeg = g_SwordRotationDeg;
+    }
+    g_ShieldAttachment = CreateAttachment("shield", "mixamorig:LeftHand", g_ShieldObjectNames);
+    if (g_ShieldAttachment)
+    {
+        g_ShieldAttachment->localPosition = g_ShieldPositionOffset;
+        g_ShieldAttachment->localRotationDeg = g_ShieldRotationDeg;
+    }
 
     BuildTrianglesFromAssimpAndAddToVirtualScene(g_PlayerModelLoader);
     
@@ -2997,7 +2990,7 @@ int main()
                 DrawVirtualObject(player_model_object_names[i].c_str());
             }
 
-            // Desenha armas posicionadas nos ossos da mão
+            // Desenha armas posicionadas nos ossos da mão (sistema de attachments)
             if (g_PlayerModelLoader.GetNumBones() > 0)
             {
                 glUniform1i(g_use_animation_uniform, 0);
@@ -3006,53 +2999,22 @@ int main()
                 glActiveTexture(GL_TEXTURE3);
                 glBindTexture(GL_TEXTURE_2D, g_DefaultGrayTextureID);
 
-                glm::mat4 rightHandTransform = g_PlayerModelLoader.GetBoneWorldTransform("mixamorig:RightHand");
-                glm::mat4 leftHandTransform = g_PlayerModelLoader.GetBoneWorldTransform("mixamorig:LeftHand");
+                glm::mat4 playerWorldMatrix = Matrix_Translate(visualPos.x, visualPos.y, visualPos.z)
+                    * Matrix_Rotate_Y(-g_PlayerYaw)
+                    * Matrix_Scale(player_model_scale, player_model_scale, player_model_scale);
 
-                glm::vec3 rhModelPos(rightHandTransform[3].x, rightHandTransform[3].y, rightHandTransform[3].z);
-                glm::vec3 lhModelPos(leftHandTransform[3].x, leftHandTransform[3].y, leftHandTransform[3].z);
-
-                // Espada na mão direita
-                if (!g_SwordObjectNames.empty())
+                for (auto* att : GetAllAttachments())
                 {
-                    glm::mat4 swordModel = Matrix_Translate(visualPos.x, visualPos.y, visualPos.z)
-                        * Matrix_Rotate_Y(-g_PlayerYaw)
-                        * Matrix_Scale(player_model_scale, player_model_scale, player_model_scale)
-                        * Matrix_Translate(rhModelPos.x - player_model_center.x,
-                                           rhModelPos.y - player_model_center.y,
-                                           rhModelPos.z - player_model_center.z)
-                        * Matrix_Rotate_X(g_SwordRotationDeg.x * 3.14159f / 180.0f)
-                        * Matrix_Rotate_Y(g_SwordRotationDeg.y * 3.14159f / 180.0f)
-                        * Matrix_Rotate_Z(g_SwordRotationDeg.z * 3.14159f / 180.0f)
-                        * Matrix_Translate(g_SwordPositionOffset.x, g_SwordPositionOffset.y, g_SwordPositionOffset.z);
-                    glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(swordModel));
-                    glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE, glm::value_ptr(glm::transpose(glm::inverse(swordModel))));
+                    if (!att || !att->visible || att->objectNames.empty())
+                        continue;
+
+                    glm::mat4 attModel = ComputeAttachmentModelMatrix(att, g_PlayerModelLoader, playerWorldMatrix, player_model_center);
+                    glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(attModel));
+                    glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE, glm::value_ptr(glm::transpose(glm::inverse(attModel))));
                     glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
                     glUniform1i(g_cube_colliding_uniform, 0);
                     glUniform3f(g_object_tint_uniform, 1.0f, 1.0f, 1.0f);
-                    for (const auto &name : g_SwordObjectNames)
-                        DrawVirtualObject(name.c_str());
-                }
-
-                // Escudo na mão esquerda
-                if (!g_ShieldObjectNames.empty())
-                {
-                    glm::mat4 shieldModel = Matrix_Translate(visualPos.x, visualPos.y, visualPos.z)
-                        * Matrix_Rotate_Y(-g_PlayerYaw)
-                        * Matrix_Scale(player_model_scale, player_model_scale, player_model_scale)
-                        * Matrix_Translate(lhModelPos.x - player_model_center.x,
-                                           lhModelPos.y - player_model_center.y,
-                                           lhModelPos.z - player_model_center.z)
-                        * Matrix_Rotate_X(g_ShieldRotationDeg.x * 3.14159f / 180.0f)
-                        * Matrix_Rotate_Y(g_ShieldRotationDeg.y * 3.14159f / 180.0f)
-                        * Matrix_Rotate_Z(g_ShieldRotationDeg.z * 3.14159f / 180.0f)
-                        * Matrix_Translate(g_ShieldPositionOffset.x, g_ShieldPositionOffset.y, g_ShieldPositionOffset.z);
-                    glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(shieldModel));
-                    glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE, glm::value_ptr(glm::transpose(glm::inverse(shieldModel))));
-                    glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
-                    glUniform1i(g_cube_colliding_uniform, 0);
-                    glUniform3f(g_object_tint_uniform, 1.0f, 1.0f, 1.0f);
-                    for (const auto &name : g_ShieldObjectNames)
+                    for (const auto &name : att->objectNames)
                         DrawVirtualObject(name.c_str());
                 }
 
@@ -3063,14 +3025,16 @@ int main()
                            visualPos.x, visualPos.y, visualPos.z,
                            g_CurrentAttackVariant < (int)g_AttackVariantNames.size() ?
                                g_AttackVariantNames[g_CurrentAttackVariant].c_str() : "none");
-                    printf("  Sword  pos=(%.1f,%.1f,%.1f) rot=(%.0f,%.0f,%.0f)\n",
-                           g_SwordPositionOffset.x, g_SwordPositionOffset.y, g_SwordPositionOffset.z,
-                           g_SwordRotationDeg.x, g_SwordRotationDeg.y, g_SwordRotationDeg.z);
-                    printf("  Shield pos=(%.1f,%.1f,%.1f) rot=(%.0f,%.0f,%.0f)\n",
-                           g_ShieldPositionOffset.x, g_ShieldPositionOffset.y, g_ShieldPositionOffset.z,
-                           g_ShieldRotationDeg.x, g_ShieldRotationDeg.y, g_ShieldRotationDeg.z);
-                    printf("  RightHand model=(%.1f,%.1f,%.1f)\n", rhModelPos.x, rhModelPos.y, rhModelPos.z);
-                    printf("  LeftHand  model=(%.1f,%.1f,%.1f)\n", lhModelPos.x, lhModelPos.y, lhModelPos.z);
+                    if (g_SwordAttachment)
+                        printf("  Sword  bone='%s' pos=(%.1f,%.1f,%.1f) rot=(%.0f,%.0f,%.0f)\n",
+                               g_SwordAttachment->boneName.c_str(),
+                               g_SwordAttachment->localPosition.x, g_SwordAttachment->localPosition.y, g_SwordAttachment->localPosition.z,
+                               g_SwordAttachment->localRotationDeg.x, g_SwordAttachment->localRotationDeg.y, g_SwordAttachment->localRotationDeg.z);
+                    if (g_ShieldAttachment)
+                        printf("  Shield bone='%s' pos=(%.1f,%.1f,%.1f) rot=(%.0f,%.0f,%.0f)\n",
+                               g_ShieldAttachment->boneName.c_str(),
+                               g_ShieldAttachment->localPosition.x, g_ShieldAttachment->localPosition.y, g_ShieldAttachment->localPosition.z,
+                               g_ShieldAttachment->localRotationDeg.x, g_ShieldAttachment->localRotationDeg.y, g_ShieldAttachment->localRotationDeg.z);
                 }
 
                 glUniform1i(g_has_player_texture_uniform, g_HasPlayerTexture ? 1 : 0);
