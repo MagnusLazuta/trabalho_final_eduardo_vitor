@@ -26,6 +26,9 @@ extern bool g_IsClimbingAVine;
 extern bool g_IsClimbingALadder;
 extern bool g_CollidedWithAVine;
 extern bool g_CollidedWithALadder;
+extern bool g_LockOnMovementActive;
+extern glm::vec4 g_LockOnMovementForward;
+extern glm::vec4 g_LockOnMovementRight;
 
 // Sistema de combate com espada
 extern bool  g_SwordAttackHitActive;

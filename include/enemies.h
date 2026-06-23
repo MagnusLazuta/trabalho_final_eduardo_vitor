@@ -150,6 +150,8 @@ int QueryEnemyHitByPlayerProjectile(const glm::vec4 &projectile_position, float 
 void ApplyPlayerProjectileDamageToEnemy(int enemy_index, int damage);
 bool QueryBlockingEnemyCollision(const glm::vec4 &center, const glm::vec4 &half_extents);
 int QuerySwordHitEnemy(const CollisionOBB &sword_obb);
+int QueryClosestLockOnEnemy(const glm::vec4 &player_position, float radius, float max_height_delta);
+bool QueryEnemyLockOnTargetPosition(int enemy_index, const glm::vec4 &player_position, float radius, float max_height_delta, glm::vec4 &target_position);
 std::size_t GetEnemyCount();
 
 #endif // _ENEMIES_H

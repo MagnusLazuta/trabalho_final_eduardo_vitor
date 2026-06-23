@@ -15,6 +15,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <algorithm>
+#include <cassert>
 
 // Headers das bibliotecas OpenGL
 #include <glad/glad.h>  // Criação de contexto OpenGL 3.3
@@ -286,6 +287,15 @@ float g_CameraDistance = 14.0f; // Distância da câmera para a origem
 bool g_FirstPersonCamera = false;
 glm::vec4 g_PositionCameraFirstPerson = glm::vec4(0.0f, 0.0f, 0.08f, 0.0f);
 
+enum class CameraMode
+{
+    ThirdPerson,
+    FirstPerson,
+    LockOn
+};
+
+CameraMode g_CameraMode = CameraMode::ThirdPerson;
+
 // Variáveis que controlam a câmera third-person estilo Zelda-like:
 bool g_ThirdPersonCamera = true;
 float g_ThirdPersonCameraDistance = 3.2f;
@@ -300,6 +310,10 @@ float g_CameraYaw = 0.0f;
 float g_CurrentThirdPersonCameraDistance = g_ThirdPersonCameraDistance;
 bool g_CameraInitialized = false;
 float g_CameraYawFollowSpeed = 4.0f;
+constexpr float LOCK_ON_RADIUS = 8.0f;
+constexpr float LOCK_ON_MAX_HEIGHT_DELTA = 3.5f;
+constexpr float LOCK_ON_TURN_SPEED = 12.0f;
+int g_LockOnTargetEnemyIndex = -1;
 
 // Variáveis que controlam rotação do antebraço
 float g_ForearmAngleZ = 0.0f;
@@ -879,12 +893,262 @@ static float SmoothApproach(float current, float target, float speed, float dt)
     return current + (target - current) * alpha;
 }
 
+static bool IsFiniteVec3(const glm::vec4 &v)
+{
+    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+
+static bool HasUsableDirection(const glm::vec4 &v)
+{
+    return IsFiniteVec3(v) && norm(v) > 0.001f;
+}
+
+static glm::vec4 ComputeFirstPersonViewVector()
+{
+    const float vx = -std::sin(g_CameraTheta) * std::cos(g_CameraPhi);
+    const float vy = std::sin(g_CameraPhi);
+    const float vz = std::cos(g_CameraTheta) * std::cos(g_CameraPhi);
+    return glm::vec4(vx, vy, vz, 0.0f);
+}
+
 static glm::vec4 ComputeFirstPersonCameraOffset()
 {
     const float eye_height = std::max(0.4f, g_PlayerCubeHalfExtents.y * 0.82f);
     glm::vec4 local_eye_offset = g_PositionCameraFirstPerson;
     local_eye_offset.y = eye_height;
     return Matrix_Rotate_Y(-g_PlayerYaw) * local_eye_offset;
+}
+
+static void ResetSlingshotState()
+{
+    g_SlingshotState.is_charging = false;
+    g_SlingshotState.fire_requested = false;
+    g_SlingshotState.charge_time_seconds = 0.0f;
+    g_SlingshotState.queued_charge_ratio = 0.0f;
+    g_SlingshotState.shot_cooldown_timer = 0.0f;
+}
+
+static void EnterThirdPersonCamera()
+{
+    g_CameraMode = CameraMode::ThirdPerson;
+    g_FirstPersonCamera = false;
+    g_ThirdPersonCamera = true;
+    g_LockOnTargetEnemyIndex = -1;
+    g_LockOnMovementActive = false;
+    g_CameraInitialized = false;
+    g_CurrentThirdPersonCameraDistance = g_ThirdPersonCameraDistance;
+    ResetSlingshotState();
+}
+
+static void EnterFirstPersonCamera()
+{
+    g_CameraMode = CameraMode::FirstPerson;
+    g_FirstPersonCamera = true;
+    g_ThirdPersonCamera = false;
+    g_LockOnTargetEnemyIndex = -1;
+    g_LockOnMovementActive = false;
+    g_CameraInitialized = false;
+    g_CurrentThirdPersonCameraDistance = g_ThirdPersonCameraDistance;
+
+    g_WPressed = false;
+    g_APressed = false;
+    g_SPressed = false;
+    g_DPressed = false;
+    g_CameraTheta = g_PlayerYaw;
+    g_CameraPhi = 0.0f;
+    camera_view_vector = glm::vec4(-std::sin(g_PlayerYaw), 0.0f, std::cos(g_PlayerYaw), 0.0f);
+}
+
+static bool RefreshLockOnTargetPosition(glm::vec4 &target_position)
+{
+    if (g_CameraMode != CameraMode::LockOn)
+        return false;
+
+    if (!QueryEnemyLockOnTargetPosition(g_LockOnTargetEnemyIndex, g_PlayerCubePosition, LOCK_ON_RADIUS, LOCK_ON_MAX_HEIGHT_DELTA, target_position))
+    {
+        g_LockOnTargetEnemyIndex = QueryClosestLockOnEnemy(g_PlayerCubePosition, LOCK_ON_RADIUS, LOCK_ON_MAX_HEIGHT_DELTA);
+        if (!QueryEnemyLockOnTargetPosition(g_LockOnTargetEnemyIndex, g_PlayerCubePosition, LOCK_ON_RADIUS, LOCK_ON_MAX_HEIGHT_DELTA, target_position))
+        {
+            std::printf("[LOCK_ON] Target lost.\n");
+            EnterThirdPersonCamera();
+            return false;
+        }
+
+        std::printf("[LOCK_ON] Switched to enemy %d.\n", g_LockOnTargetEnemyIndex);
+    }
+
+    return true;
+}
+
+static bool ComputeLockOnDirection(const glm::vec4 &target_position, glm::vec4 &enemy_direction)
+{
+    enemy_direction = target_position - g_PlayerCubePosition;
+    enemy_direction.y = 0.0f;
+    enemy_direction.w = 0.0f;
+
+    const float planar_distance = std::sqrt(enemy_direction.x * enemy_direction.x +
+                                            enemy_direction.z * enemy_direction.z);
+    if (planar_distance <= 0.001f)
+        return false;
+
+    enemy_direction = enemy_direction / planar_distance;
+    return true;
+}
+
+static float ComputePlayerYawFacingDirection(const glm::vec4 &direction)
+{
+    return std::atan2(-direction.x, direction.z);
+}
+
+static glm::vec4 ComputePlayerForwardFromYaw(float yaw)
+{
+    return glm::vec4(-std::sin(yaw), 0.0f, std::cos(yaw), 0.0f);
+}
+
+static glm::vec4 ComputePlayerRightFromYaw(float yaw)
+{
+    return glm::vec4(std::cos(yaw), 0.0f, std::sin(yaw), 0.0f);
+}
+
+static void PrepareLockOnMovement(float delta_time)
+{
+    (void)delta_time;
+    g_LockOnMovementActive = false;
+    if (g_CameraMode != CameraMode::LockOn)
+        return;
+
+    glm::vec4 target_position;
+    if (!RefreshLockOnTargetPosition(target_position))
+        return;
+
+    glm::vec4 enemy_direction;
+    if (!ComputeLockOnDirection(target_position, enemy_direction))
+    {
+        EnterThirdPersonCamera();
+        return;
+    }
+
+    const float target_yaw = ComputePlayerYawFacingDirection(enemy_direction);
+    g_PlayerYaw = target_yaw;
+
+    g_LockOnMovementForward = ComputePlayerForwardFromYaw(g_PlayerYaw);
+    g_LockOnMovementRight = ComputePlayerRightFromYaw(g_PlayerYaw);
+    g_LockOnMovementActive = true;
+}
+
+static bool TryEnterLockOnCamera()
+{
+    const int target_enemy = QueryClosestLockOnEnemy(g_PlayerCubePosition, LOCK_ON_RADIUS, LOCK_ON_MAX_HEIGHT_DELTA);
+    if (target_enemy < 0)
+    {
+        std::printf("[LOCK_ON] No valid enemy within %.1f units and %.1f height.\n", LOCK_ON_RADIUS, LOCK_ON_MAX_HEIGHT_DELTA);
+        return false;
+    }
+
+    g_CameraMode = CameraMode::LockOn;
+    g_FirstPersonCamera = false;
+    g_ThirdPersonCamera = false;
+    g_LockOnMovementActive = false;
+    g_LockOnTargetEnemyIndex = target_enemy;
+    g_CameraInitialized = false;
+    g_CurrentThirdPersonCameraDistance = g_ThirdPersonCameraDistance;
+    ResetSlingshotState();
+    std::printf("[LOCK_ON] Target enemy %d acquired.\n", g_LockOnTargetEnemyIndex);
+    return true;
+}
+
+static bool UpdateLockOnCamera(float delta_time)
+{
+    glm::vec4 target_position;
+    if (!RefreshLockOnTargetPosition(target_position))
+        return false;
+
+    glm::vec4 enemy_direction;
+    if (!ComputeLockOnDirection(target_position, enemy_direction))
+    {
+        EnterThirdPersonCamera();
+        return false;
+    }
+
+    const float target_yaw = ComputePlayerYawFacingDirection(enemy_direction);
+    g_PlayerYaw = target_yaw;
+    g_CameraYaw = target_yaw;
+    const glm::vec4 player_forward = ComputePlayerForwardFromYaw(g_PlayerYaw);
+    const glm::vec4 player_back = -player_forward;
+
+    static float lock_on_smoothed_player_y = g_PlayerCubePosition.y;
+    lock_on_smoothed_player_y += (g_PlayerCubePosition.y - lock_on_smoothed_player_y)
+                                 * std::min(1.0f, 8.0f * delta_time);
+    glm::vec4 smoothed_player_position = g_PlayerCubePosition;
+    smoothed_player_position.y = lock_on_smoothed_player_y;
+
+    const glm::vec4 camera_target_world =
+        smoothed_player_position + glm::vec4(0.0f, g_ThirdPersonLookAtHeight, 0.0f, 0.0f);
+
+    const float player_enemy_distance = std::sqrt(
+        (target_position.x - g_PlayerCubePosition.x) * (target_position.x - g_PlayerCubePosition.x) +
+        (target_position.z - g_PlayerCubePosition.z) * (target_position.z - g_PlayerCubePosition.z));
+    const float focus_offset = std::min(2.0f, player_enemy_distance * 0.35f);
+    const glm::vec4 camera_focus_world =
+        camera_target_world + player_forward * focus_offset +
+        glm::vec4(0.0f, 0.15f, 0.0f, 0.0f);
+
+    const glm::vec4 desired_camera_world =
+        smoothed_player_position + player_back * g_ThirdPersonCameraDistance +
+        glm::vec4(0.0f, g_ThirdPersonCameraHeight, 0.0f, 0.0f);
+
+    const glm::vec4 camera_path = desired_camera_world - camera_target_world;
+    const float ideal_camera_distance = norm(camera_path);
+    if (!g_CameraInitialized)
+    {
+        g_CurrentThirdPersonCameraDistance = ideal_camera_distance;
+        g_CameraInitialized = true;
+    }
+
+    float target_camera_distance = ideal_camera_distance;
+    float obstruction_distance = ideal_camera_distance;
+    if (FindCameraObstructionDistance(camera_target_world, desired_camera_world, obstruction_distance))
+    {
+        target_camera_distance = std::max(CAMERA_MIN_DISTANCE, obstruction_distance - CAMERA_WALL_PADDING);
+    }
+
+    const float camera_follow_speed =
+        (target_camera_distance < g_CurrentThirdPersonCameraDistance)
+            ? CAMERA_IN_SPEED
+            : CAMERA_OUT_SPEED;
+    g_CurrentThirdPersonCameraDistance = SmoothApproach(
+        g_CurrentThirdPersonCameraDistance,
+        target_camera_distance,
+        camera_follow_speed,
+        delta_time);
+    g_CurrentThirdPersonCameraDistance = std::max(CAMERA_MIN_DISTANCE, std::min(ideal_camera_distance, g_CurrentThirdPersonCameraDistance));
+
+    const glm::vec4 camera_position_world =
+        (ideal_camera_distance > 0.0001f)
+            ? camera_target_world + (camera_path / ideal_camera_distance) * g_CurrentThirdPersonCameraDistance
+            : desired_camera_world;
+
+    camera_position_c = glm::vec4(camera_position_world.x, camera_position_world.y, camera_position_world.z, 1.0f);
+    camera_lookat_l = glm::vec4(camera_focus_world.x, camera_focus_world.y, camera_focus_world.z, 1.0f);
+    camera_view_vector = camera_lookat_l - camera_position_c;
+    camera_up_vector = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
+    return true;
+}
+
+static void DrawLockOnTargetIndicator()
+{
+    if (g_CameraMode != CameraMode::LockOn)
+        return;
+
+    glm::vec4 target_position;
+    if (!QueryEnemyLockOnTargetPosition(g_LockOnTargetEnemyIndex, g_PlayerCubePosition, LOCK_ON_RADIUS, LOCK_ON_MAX_HEIGHT_DELTA, target_position))
+        return;
+
+    const glm::vec4 arrow_origin = target_position + glm::vec4(0.0f, 0.95f, 0.0f, 0.0f);
+    const glm::vec4 arrow_direction(0.0f, -0.55f, 0.0f, 0.0f);
+    glUniform1i(g_cube_colliding_uniform, 0);
+    glUniform3f(g_object_tint_uniform, 1.0f, 0.0f, 0.0f);
+    DrawDebugArrow(arrow_origin, arrow_direction, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
 }
 
 static float GetSlingshotPullAmount()
@@ -894,7 +1158,12 @@ static float GetSlingshotPullAmount()
 
 static glm::vec4 ComputeProjectileSpawnPosition(const glm::vec4 &camera_position, const glm::vec4 &view_direction)
 {
-    return camera_position + 0.35f * view_direction;
+    assert(IsFiniteVec3(camera_position));
+    assert(HasUsableDirection(view_direction));
+
+    glm::vec4 spawn_position = camera_position + 0.35f * view_direction;
+    spawn_position.w = 1.0f;
+    return spawn_position;
 }
 
 static void BeginSlingshotCharge()
@@ -945,6 +1214,13 @@ static ProjectileCollisionResult QueryProjectileCollision(const ProjectileState 
 
 static void FireSlingshotProjectile(const glm::vec4 &camera_position, const glm::vec4 &view_direction)
 {
+    if (!IsFiniteVec3(camera_position) || !HasUsableDirection(view_direction))
+    {
+        g_SlingshotState.fire_requested = false;
+        g_SlingshotState.queued_charge_ratio = 0.0f;
+        return;
+    }
+
     const float charge_ratio = g_SlingshotState.queued_charge_ratio;
     const float min_projectile_speed = 10.0f;
     const float max_projectile_speed = 24.0f;
@@ -2479,6 +2755,8 @@ int main()
 
         // State machine antes do movimento — precisa de onGround do frame anterior
         // para detectar transição de pulo (movement.cpp zera onGround internamente)
+        PrepareLockOnMovement(delta_time);
+
         g_PlayerStateMachine.Update(g_WPressed, g_SPressed, g_ShiftPressed,
                                     g_AttackPressed, g_DefendPressed, g_SpacePressed,
                                     g_IsClimbingAVine, g_IsClimbingALadder,
@@ -2653,7 +2931,12 @@ int main()
         // os shaders de vértice e fragmentos).
         glUseProgram(g_GpuProgramID);
 
-        if (g_ThirdPersonCamera)
+        if (g_CameraMode == CameraMode::LockOn)
+        {
+            UpdateLockOnCamera(delta_time);
+        }
+
+        if (g_CameraMode == CameraMode::ThirdPerson)
         {
             // Câmera third-person estilo Zelda-like:
             // gira suavemente para alinhar com o personagem e não orbita bruscamente.
@@ -2716,24 +2999,26 @@ int main()
             camera_up_vector = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);                                                           // Vetor "up" fixado para apontar para o "céu" (eito Y global)
         }
 
-        else if (g_FirstPersonCamera)
+        else if (g_CameraMode == CameraMode::FirstPerson)
         {
             //PrintVector(g_PositionCameraFirstPerson);
             glm::vec4 offset = ComputeFirstPersonCameraOffset();
 
             camera_position_c = g_PlayerCubePosition + offset;
-            camera_view_vector = camera_view_vector;
+            camera_position_c.w = 1.0f;
+            camera_view_vector = ComputeFirstPersonViewVector();
+            camera_view_vector.w = 0.0f;
             camera_up_vector = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
         }
 
-        if (glm::length(camera_view_vector) <= 0.001f)
+        if (!HasUsableDirection(camera_view_vector))
         {
             camera_view_vector = glm::vec4(0.0f, 0.0f, -1.0f, 0.0f); // Força um vetor válido apontando para frente
         }
 
         // Computamos a matriz "View" utilizando os parâmetros da câmera para
         // definir o sistema de coordenadas da câmera.  Veja slides 2-14, 184-190 e 236-242 do documento Aula_08_Sistemas_de_Coordenadas.pdf.
-        const float camera_view_length = glm::length(camera_view_vector);
+        const float camera_view_length = norm(camera_view_vector);
         const glm::vec4 projectile_view_direction =
             (camera_view_length > 0.001f)
                 ? camera_view_vector / camera_view_length
@@ -3076,6 +3361,7 @@ int main()
         enemy_draw_context.draw_virtual_object = DrawVirtualObject;
 
         DrawEnemies(enemy_draw_context);
+        DrawLockOnTargetIndicator();
 
         const float fairy_orbit_progress = std::fmod(static_cast<float>(current_frame_time) / g_FairyMotionParams.orbit_period_seconds, 1.0f);
         const glm::vec4 fairy_head_center = g_PlayerCubePosition + glm::vec4(0.0f, g_FairyMotionParams.head_height_offset, 0.0f, 0.0f);
@@ -3678,6 +3964,11 @@ void BuildTrianglesAndAddToVirtualScene(ObjModel *model, GLuint default_texture_
                             const float v = model->attrib.texcoords[2 * idx.texcoord_index + 1];
                             texture_coefficients.push_back(u);
                             texture_coefficients.push_back(v);
+                        }
+                        else
+                        {
+                            texture_coefficients.push_back(0.0f);
+                            texture_coefficients.push_back(0.0f);
                         }
                     }
                 }
@@ -4624,9 +4915,16 @@ void MouseButtonCallback(GLFWwindow *window, int button, int action, int mods)
         glfwGetCursorPos(window, &g_LastCursorPosX, &g_LastCursorPosY);
         g_LeftMouseButtonPressed = true;
 
-        // Inicializamos Theta e Phi a partir do camera_view_vector atual para evitar pulos
-        g_CameraPhi = std::asin(camera_view_vector.y / glm::length(camera_view_vector));
-        g_CameraTheta = std::atan2(-camera_view_vector.x, camera_view_vector.z);
+        // Inicializamos Theta e Phi a partir do camera_view_vector atual para evitar pulos.
+        if (!HasUsableDirection(camera_view_vector))
+            camera_view_vector = ComputeFirstPersonViewVector();
+        const float current_view_length = norm(camera_view_vector);
+        if (current_view_length > 0.001f)
+        {
+            const float normalized_y = std::max(-1.0f, std::min(1.0f, camera_view_vector.y / current_view_length));
+            g_CameraPhi = std::asin(normalized_y);
+            g_CameraTheta = std::atan2(-camera_view_vector.x, camera_view_vector.z);
+        }
 
         if (g_FirstPersonCamera)
         {
@@ -4716,11 +5014,7 @@ void CursorPosCallback(GLFWwindow *window, double xpos, double ypos)
         if (g_CameraPhi < phimin)
             g_CameraPhi = phimin;
 
-        float vx = -std::sin(g_CameraTheta) * std::cos(g_CameraPhi);
-        float vy = std::sin(g_CameraPhi);
-        float vz = std::cos(g_CameraTheta) * std::cos(g_CameraPhi);
-
-        camera_view_vector = glm::vec4(vx, vy, vz, 0.0f);
+        camera_view_vector = ComputeFirstPersonViewVector();
     }
 }
 
@@ -4760,29 +5054,18 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
     // Se o usuário apertar a tecla P, mudará o tipo de câmera entre primeira pessoa e terceira pessoa. Veja definição das variáveis globais g_FirstPersonCamera e g_ThirdPersonCamera no início deste arquivo.
     if (key == GLFW_KEY_P && action == GLFW_PRESS && !g_IsClimbingAVine && !g_IsClimbingALadder)
     {
-        g_FirstPersonCamera = !g_FirstPersonCamera;
-        g_ThirdPersonCamera = !g_ThirdPersonCamera;
-        g_CameraInitialized = false;
-        g_CurrentThirdPersonCameraDistance = g_ThirdPersonCameraDistance;
-
-        if (g_FirstPersonCamera)
-        {
-            g_WPressed = false;
-            g_APressed = false;
-            g_SPressed = false;
-            g_DPressed = false;
-            g_CameraTheta = g_PlayerYaw;
-            g_CameraPhi = 0.0f;
-            camera_view_vector = glm::vec4(-std::sin(g_PlayerYaw), 0.0f, std::cos(g_PlayerYaw), 0.0f);
-        }
+        if (g_CameraMode == CameraMode::FirstPerson)
+            EnterThirdPersonCamera();
         else
-        {
-            g_SlingshotState.is_charging = false;
-            g_SlingshotState.fire_requested = false;
-            g_SlingshotState.charge_time_seconds = 0.0f;
-            g_SlingshotState.queued_charge_ratio = 0.0f;
-            g_SlingshotState.shot_cooldown_timer = 0.0f;
-        }
+            EnterFirstPersonCamera();
+    }
+
+    if (key == GLFW_KEY_K && action == GLFW_PRESS)
+    {
+        if (g_CameraMode == CameraMode::LockOn)
+            EnterThirdPersonCamera();
+        else
+            TryEnterLockOnCamera();
     }
 
     // Se o usuário apertar a tecla R, recarregamos os shaders dos arquivos "shader_fragment.glsl" e "shader_vertex.glsl".

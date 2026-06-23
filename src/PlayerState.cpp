@@ -41,7 +41,8 @@ void PlayerStateMachine::Update(bool wPressed, bool sPressed, bool shiftPressed,
 {
     m_previousState = m_currentState;
 
-    bool wantsMove = wPressed || sPressed;
+    bool wantsMove = wPressed || sPressed ||
+                     (g_LockOnMovementActive && (g_APressed || g_DPressed));
 
     if (isClimbingLadder) {
         m_currentState = PlayerState::CLIMBING_LADDER;

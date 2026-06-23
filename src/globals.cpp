@@ -21,6 +21,9 @@ bool g_IsClimbingAVine = false;
 bool g_IsClimbingALadder = false;
 bool g_CollidedWithAVine = false;
 bool g_CollidedWithALadder = false;
+bool g_LockOnMovementActive = false;
+glm::vec4 g_LockOnMovementForward(0.0f, 0.0f, 1.0f, 0.0f);
+glm::vec4 g_LockOnMovementRight(1.0f, 0.0f, 0.0f, 0.0f);
 
 bool  g_SwordAttackHitActive = false;
 float g_SwordAttackHitCooldown = 0.0f;

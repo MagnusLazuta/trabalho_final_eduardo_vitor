@@ -458,7 +458,20 @@ static bool BoxesIntersect(
 static bool EnemyBlocksPlayerMovement(const Enemy &enemy)
 {
     return enemy.active && !enemy.dead && enemy.visible &&
-           enemy.state != EnemyState::Dying && enemy.blocks_movement;
+           enemy.state != EnemyState::Dying;
+}
+
+static glm::vec4 GetEnemyMovementBlockHalfExtents(const Enemy &enemy)
+{
+    if (enemy.blocks_movement)
+        return enemy.collision_half_extents;
+
+    glm::vec4 half_extents = enemy.collision_half_extents;
+    half_extents.x = std::max(0.22f, std::min(half_extents.x, 0.45f));
+    half_extents.y = std::max(0.35f, std::min(half_extents.y, 0.75f));
+    half_extents.z = std::max(0.22f, std::min(half_extents.z, 0.45f));
+    half_extents.w = 0.0f;
+    return half_extents;
 }
 
 static bool WouldBlockingEnemyOverlapPlayer(
@@ -468,7 +481,7 @@ static bool WouldBlockingEnemyOverlapPlayer(
     const glm::vec4 &player_half_extents)
 {
     return EnemyBlocksPlayerMovement(enemy) &&
-           BoxesIntersect(enemy_position, enemy.collision_half_extents, player_position, player_half_extents);
+           BoxesIntersect(enemy_position, GetEnemyMovementBlockHalfExtents(enemy), player_position, player_half_extents);
 }
 
 static void MoveEnemyWithScenarioCollision(
@@ -1438,11 +1451,68 @@ bool QueryBlockingEnemyCollision(const glm::vec4 &center, const glm::vec4 &half_
         if (!EnemyBlocksPlayerMovement(enemy))
             continue;
 
-        if (BoxesIntersect(center, half_extents, enemy.position, enemy.collision_half_extents))
+        if (BoxesIntersect(center, half_extents, enemy.position, GetEnemyMovementBlockHalfExtents(enemy)))
             return true;
     }
 
     return false;
+}
+
+static bool IsValidLockOnTarget(const Enemy &enemy)
+{
+    return enemy.active && !enemy.dead && enemy.visible && enemy.state != EnemyState::Dying;
+}
+
+static bool IsEnemyWithinLockOnRange(const Enemy &enemy, const glm::vec4 &player_position, float radius, float max_height_delta)
+{
+    const glm::vec4 delta = enemy.position - player_position;
+    if (std::fabs(delta.y) > max_height_delta)
+        return false;
+
+    const float distance_sq = delta.x * delta.x + delta.z * delta.z;
+    return distance_sq <= radius * radius;
+}
+
+int QueryClosestLockOnEnemy(const glm::vec4 &player_position, float radius, float max_height_delta)
+{
+    const float radius_sq = radius * radius;
+    float closest_distance_sq = radius_sq;
+    int closest_index = -1;
+
+    for (std::size_t i = 0; i < g_Enemies.size(); ++i)
+    {
+        const Enemy &enemy = g_Enemies[i];
+        if (!IsValidLockOnTarget(enemy))
+            continue;
+        if (!IsEnemyWithinLockOnRange(enemy, player_position, radius, max_height_delta))
+            continue;
+
+        const glm::vec4 delta = enemy.position - player_position;
+        const float distance_sq = delta.x * delta.x + delta.z * delta.z;
+        if (distance_sq <= closest_distance_sq)
+        {
+            closest_distance_sq = distance_sq;
+            closest_index = static_cast<int>(i);
+        }
+    }
+
+    return closest_index;
+}
+
+bool QueryEnemyLockOnTargetPosition(int enemy_index, const glm::vec4 &player_position, float radius, float max_height_delta, glm::vec4 &target_position)
+{
+    if (enemy_index < 0 || enemy_index >= static_cast<int>(g_Enemies.size()))
+        return false;
+
+    const Enemy &enemy = g_Enemies[enemy_index];
+    if (!IsValidLockOnTarget(enemy))
+        return false;
+    if (!IsEnemyWithinLockOnRange(enemy, player_position, radius, max_height_delta))
+        return false;
+
+    target_position = enemy.position + glm::vec4(0.0f, enemy.collision_half_extents.y * 0.55f, 0.0f, 0.0f);
+    target_position.w = 1.0f;
+    return true;
 }
 
 static bool ObbAabbIntersect(
