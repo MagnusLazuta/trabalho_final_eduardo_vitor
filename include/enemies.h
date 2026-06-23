@@ -83,6 +83,7 @@ struct Enemy
     glm::vec4 death_start_position;
     glm::vec4 death_velocity;
     float death_rotation;
+    float hit_flash_timer;
     glm::vec4 debug_color;
     std::string object_name;
 };
@@ -148,7 +149,7 @@ void DrawEnemyProjectiles(const EnemyDrawContext &context);
 int QueryEnemyHitByPlayerProjectile(const glm::vec4 &projectile_position, float projectile_radius);
 void ApplyPlayerProjectileDamageToEnemy(int enemy_index, int damage);
 bool QueryBlockingEnemyCollision(const glm::vec4 &center, const glm::vec4 &half_extents);
-int QuerySwordHitEnemy(const glm::vec4 &sword_box_center, const glm::vec4 &sword_box_half_extents);
+int QuerySwordHitEnemy(const CollisionOBB &sword_obb);
 std::size_t GetEnemyCount();
 
 #endif // _ENEMIES_H

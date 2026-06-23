@@ -1007,8 +1007,8 @@ static void CheckSwordEnemyCollisions(float delta_time)
     }
 
     const float attack_progress = 1.0f - (g_PlayerStateMachine.GetAttackTimer());
-    const float hit_window_start = 0.05f;
-    const float hit_window_end = 0.70f;
+    const float hit_window_start = 0.25f;
+    const float hit_window_end = 0.55f;
 
     if (attack_progress < hit_window_start || attack_progress > hit_window_end)
     {
@@ -1018,31 +1018,7 @@ static void CheckSwordEnemyCollisions(float delta_time)
 
     g_SwordAttackHitActive = true;
 
-    const float forward_x = -std::sin(g_PlayerYaw);
-    const float forward_z = -std::cos(g_PlayerYaw);
-
-    const float sword_reach = 1.4f;
-    const float sword_half_reach = sword_reach * 0.5f;
-    const float sword_width = 0.8f;
-    const float sword_height = 1.2f;
-
-    float center_x = g_PlayerCubePosition.x + forward_x * sword_half_reach;
-    float center_y = g_PlayerCubePosition.y + 0.8f;
-    float center_z = g_PlayerCubePosition.z + forward_z * sword_half_reach;
-
-    glm::vec4 sword_center(center_x, center_y, center_z, 1.0f);
-
-    float dx = std::fabs(forward_x);
-    float dz = std::fabs(forward_z);
-
-    glm::vec4 sword_half_extents(
-        dx * sword_half_reach + dz * sword_width,
-        sword_height,
-        dz * sword_half_reach + dx * sword_width,
-        0.0f
-    );
-
-    const int hit_index = QuerySwordHitEnemy(sword_center, sword_half_extents);
+    const int hit_index = QuerySwordHitEnemy(g_SwordHitbox);
     if (hit_index >= 0)
     {
         if (hit_index < (int)g_SwordHitEnemies.size() && !g_SwordHitEnemies[hit_index])
@@ -1493,6 +1469,9 @@ void UpdateEnemy(size_t enemy_index, float delta_time)
     enemy.state_timer += delta_time;
     enemy.animation_timer += delta_time;
 
+    if (enemy.hit_flash_timer > 0.0f)
+        enemy.hit_flash_timer = std::max(0.0f, enemy.hit_flash_timer - delta_time);
+
     switch (enemy.type)
     {
     case EnemyType::DEKU_BABA:
@@ -1584,7 +1563,27 @@ void DrawEnemies()
             g_object_id_uniform,
             IsEnemyUsingPlaceholder(enemy) ? OBJECT_ID_SPHERE : OBJECT_ID_ENEMY);
         glUniform1i(g_cube_colliding_uniform, 0);
-        glUniform3f(g_object_tint_uniform, enemy.debug_color.x, enemy.debug_color.y, enemy.debug_color.z);
+
+        float tint_r, tint_g, tint_b;
+        if (enemy.hit_flash_timer > 0.0f)
+        {
+            tint_r = 1.0f;
+            tint_g = 0.2f;
+            tint_b = 0.2f;
+        }
+        else if (IsEnemyUsingPlaceholder(enemy))
+        {
+            tint_r = enemy.debug_color.x;
+            tint_g = enemy.debug_color.y;
+            tint_b = enemy.debug_color.z;
+        }
+        else
+        {
+            tint_r = 1.0f;
+            tint_g = 1.0f;
+            tint_b = 1.0f;
+        }
+        glUniform3f(g_object_tint_uniform, tint_r, tint_g, tint_b);
 
         for (size_t object_index = 0; object_index < render_info.object_names.size(); ++object_index)
             DrawVirtualObject(render_info.object_names[object_index].c_str());
@@ -3014,6 +3013,20 @@ int main()
                     glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
                     glUniform1i(g_cube_colliding_uniform, 0);
                     glUniform3f(g_object_tint_uniform, 1.0f, 1.0f, 1.0f);
+
+                    if (att == g_SwordAttachment && g_SwordAttackHitActive)
+                    {
+                        glm::vec3 swordPos(attModel[3].x, attModel[3].y, attModel[3].z);
+                        glm::vec3 bladeDir(attModel[2].x, attModel[2].y, attModel[2].z);
+                        bladeDir = glm::normalize(bladeDir);
+
+                        swordPos = swordPos + bladeDir * 0.35f;
+
+                        g_SwordHitbox.center = glm::vec4(swordPos, 1.0f);
+                        g_SwordHitbox.half_extents = glm::vec4(0.08f, 0.06f, 0.55f, 0.0f);
+                        g_SwordHitbox.yaw = std::atan2(bladeDir.x, bladeDir.z);
+                    }
+
                     for (const auto &name : att->objectNames)
                         DrawVirtualObject(name.c_str());
                 }
@@ -3135,6 +3148,13 @@ int main()
                 glm::vec4 player_color(0.0f, 1.0f, 0.0f, 1.0f);
                 CollisionOBB player_obb = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
                 DrawDebugOBB(player_obb, player_color);
+            }
+
+            // Sword hitbox (vermelho) — só aparece quando a espada está ativa
+            if (g_SwordAttackHitActive)
+            {
+                glm::vec4 sword_color(1.0f, 0.0f, 0.0f, 1.0f);
+                DrawDebugOBB(g_SwordHitbox, sword_color);
             }
 
             if (g_AnimDebugFrameCounter % g_AnimDebugPrintInterval == 0) {

@@ -50,6 +50,7 @@ static const float GOHMA_LARVA_JUMP_DURATION = 0.7f;
 static const float QUEEN_GOHMA_STUN_DURATION = 4.0f;
 static const float ENEMY_DEATH_DURATION = 1.15f;
 static const float ENEMY_DEATH_GRAVITY = 7.8f;
+static const float ENEMY_HIT_FLASH_DURATION = 0.15f;
 
 static const RenderModelInfo g_EmptyRenderModelInfo = {false, {}, glm::vec4(0.0f), 1.0f};
 static const char *g_EnemySpawnScriptPathFromBin = "../../data/enemy_spawns.json";
@@ -291,6 +292,7 @@ static Enemy MakeEnemy(
     enemy.death_start_position = position;
     enemy.death_velocity = glm::vec4(0.0f);
     enemy.death_rotation = 0.0f;
+    enemy.hit_flash_timer = 0.0f;
     enemy.debug_color = glm::vec4(0.75f, 0.75f, 0.75f, 1.0f);
     enemy.object_name = object_name;
     return enemy;
@@ -620,6 +622,7 @@ static void ApplyDamageToEnemy(Enemy &enemy, int damage)
     }
 
     enemy.health -= damage;
+    enemy.hit_flash_timer = ENEMY_HIT_FLASH_DURATION;
     if (enemy.health <= 0)
     {
         BeginEnemyDeath(enemy);
@@ -1197,6 +1200,9 @@ void UpdateEnemy(std::size_t enemy_index, float delta_time, const EnemyUpdateCon
     enemy.state_timer += delta_time;
     enemy.animation_timer += delta_time;
 
+    if (enemy.hit_flash_timer > 0.0f)
+        enemy.hit_flash_timer = std::max(0.0f, enemy.hit_flash_timer - delta_time);
+
     if (enemy.state == EnemyState::Dying)
     {
         UpdateEnemyDying(enemy, delta_time);
@@ -1319,11 +1325,27 @@ void DrawEnemies(const EnemyDrawContext &context)
             context.object_id_uniform,
             using_placeholder ? context.object_id_sphere : context.object_id_enemy);
         glUniform1i(context.cube_colliding_uniform, 0);
-        glUniform3f(
-            context.object_tint_uniform,
-            use_enemy_tint ? enemy.debug_color.x : 1.0f,
-            use_enemy_tint ? enemy.debug_color.y : 1.0f,
-            use_enemy_tint ? enemy.debug_color.z : 1.0f);
+
+        float tint_r, tint_g, tint_b;
+        if (enemy.hit_flash_timer > 0.0f)
+        {
+            tint_r = 1.0f;
+            tint_g = 0.2f;
+            tint_b = 0.2f;
+        }
+        else if (use_enemy_tint)
+        {
+            tint_r = enemy.debug_color.x;
+            tint_g = enemy.debug_color.y;
+            tint_b = enemy.debug_color.z;
+        }
+        else
+        {
+            tint_r = 1.0f;
+            tint_g = 1.0f;
+            tint_b = 1.0f;
+        }
+        glUniform3f(context.object_tint_uniform, tint_r, tint_g, tint_b);
 
         if (enemy.type == EnemyType::DEKU_SCRUB)
             glDisable(GL_CULL_FACE);
@@ -1423,7 +1445,32 @@ bool QueryBlockingEnemyCollision(const glm::vec4 &center, const glm::vec4 &half_
     return false;
 }
 
-int QuerySwordHitEnemy(const glm::vec4 &sword_box_center, const glm::vec4 &sword_box_half_extents)
+static bool ObbAabbIntersect(
+    const CollisionOBB &obb,
+    const glm::vec4 &aabb_center,
+    const glm::vec4 &aabb_half_extents)
+{
+    const float cos_theta = std::cos(obb.yaw);
+    const float sin_theta = std::sin(obb.yaw);
+
+    const glm::vec4 delta = aabb_center - obb.center;
+
+    glm::vec4 local_center;
+    local_center.x = cos_theta * delta.x + sin_theta * delta.z;
+    local_center.y = delta.y;
+    local_center.z = -sin_theta * delta.x + cos_theta * delta.z;
+    local_center.w = 0.0f;
+
+    glm::vec4 local_half;
+    local_half.x = aabb_half_extents.x * std::fabs(cos_theta) + aabb_half_extents.z * std::fabs(sin_theta);
+    local_half.y = aabb_half_extents.y;
+    local_half.z = aabb_half_extents.x * std::fabs(sin_theta) + aabb_half_extents.z * std::fabs(cos_theta);
+    local_half.w = 0.0f;
+
+    return BoxesIntersect(local_center, local_half, glm::vec4(0.0f), obb.half_extents);
+}
+
+int QuerySwordHitEnemy(const CollisionOBB &sword_obb)
 {
     for (std::size_t i = 0; i < g_Enemies.size(); ++i)
     {
@@ -1431,7 +1478,7 @@ int QuerySwordHitEnemy(const glm::vec4 &sword_box_center, const glm::vec4 &sword
         if (!enemy.active || enemy.dead || !enemy.visible || enemy.state == EnemyState::Dying)
             continue;
 
-        if (BoxesIntersect(sword_box_center, sword_box_half_extents, enemy.position, enemy.collision_half_extents))
+        if (ObbAabbIntersect(sword_obb, enemy.position, enemy.collision_half_extents))
             return static_cast<int>(i);
     }
 

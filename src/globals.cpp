@@ -26,6 +26,7 @@ bool  g_SwordAttackHitActive = false;
 float g_SwordAttackHitCooldown = 0.0f;
 std::vector<bool> g_SwordHitEnemies;
 int   g_SwordDamage = 1;
+CollisionOBB g_SwordHitbox = {glm::vec4(0.0f), glm::vec4(0.0f), 0.0f};
 
 bool g_ShowDebugHitboxes = false;
 bool g_ShowPlayerCoords = false;

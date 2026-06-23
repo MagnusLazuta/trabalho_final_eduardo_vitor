@@ -150,7 +150,7 @@ void main()
     else if ( object_id == ENEMY )
     {
         vec4 tex_color = texture(TextureImage0, texcoords);
-        Kd0 = tex_color.rgb;
+        Kd0 = tex_color.rgb * object_tint;
         alpha = tex_color.a;
     }
     else if ( object_id == EFFECT )

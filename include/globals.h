@@ -32,6 +32,7 @@ extern bool  g_SwordAttackHitActive;
 extern float g_SwordAttackHitCooldown;
 extern std::vector<bool> g_SwordHitEnemies;
 extern int   g_SwordDamage;
+extern CollisionOBB g_SwordHitbox;
 
 // Debug drawing
 extern bool g_ShowDebugHitboxes;
