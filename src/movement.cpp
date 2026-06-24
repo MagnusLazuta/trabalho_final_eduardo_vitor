@@ -10,15 +10,15 @@
 
 bool QueryBlockingEnemyCollision(const glm::vec4 &center, const glm::vec4 &half_extents);
 
-const float gravity    = -9.8f;
-const float jump_speed =  4.0f;
+const float gravity = -9.8f;
+const float jump_speed = 4.0f;
 const float step_height = 0.20f;
 const float step_subdiv = 0.04f;
 
 static bool IsCobwebBroken(const CollisionShape &shape)
 {
     glm::vec4 center = (shape.bbox_min + shape.bbox_max) * 0.5f;
-    for (const auto &cw : g_Cobwebs)    
+    for (const auto &cw : g_Cobwebs)
     {
         if (!cw.broken)
             continue;
@@ -141,22 +141,25 @@ static bool IsPositionFreeForClimbing(const glm::vec4 &pos, const glm::vec4 &hal
 
 // Tenta movimento horizontal com step climbing incremental
 static bool TryMoveHorizontal(glm::vec4 &pos, float delta, int axis,
-                               const glm::vec4 &halfExt, float yaw, float margin)
+                              const glm::vec4 &halfExt, float yaw, float margin)
 {
     float original_y = pos.y;
 
     glm::vec4 test = pos;
     (axis == 0 ? test.x : test.z) += delta;
 
-    if (IsPositionFreeWalkThrough(test, halfExt, yaw)) {
+    if (IsPositionFreeWalkThrough(test, halfExt, yaw))
+    {
         (axis == 0 ? pos.x : pos.z) = (axis == 0 ? test.x : test.z);
         return true;
     }
 
-    for (float lifted = step_subdiv; lifted <= step_height + 0.001f; lifted += step_subdiv) {
+    for (float lifted = step_subdiv; lifted <= step_height + 0.001f; lifted += step_subdiv)
+    {
         glm::vec4 step = test;
         step.y = original_y + lifted;
-        if (IsPositionFreeWalkThrough(step, halfExt, yaw)) {
+        if (IsPositionFreeWalkThrough(step, halfExt, yaw))
+        {
             pos.x = step.x;
             pos.z = step.z;
             pos.y = step.y;
@@ -176,8 +179,10 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     {
         g_PlayerVerticalVelocity = 0.0f;
         float climb_speed = g_IsClimbingALadder ? 2.0f : 1.5f;
-        if (g_WPressed) vertical_move_amount += climb_speed * delta_time;
-        if (g_SPressed) vertical_move_amount -= climb_speed * delta_time;
+        if (g_WPressed)
+            vertical_move_amount += climb_speed * delta_time;
+        if (g_SPressed)
+            vertical_move_amount -= climb_speed * delta_time;
 
         static int climbDebugCounter = 0;
         climbDebugCounter++;
@@ -205,9 +210,11 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
             }
 
             float side_input = 0.0f;
-            if (g_APressed) side_input += 1.0f;
-            if (g_DPressed) side_input -= 1.0f;
-            
+            if (g_APressed)
+                side_input += 1.0f;
+            if (g_DPressed)
+                side_input -= 1.0f;
+
             glm::vec4 player_right(std::cos(g_PlayerYaw), 0.0f, std::sin(g_PlayerYaw), 0.0f);
             horizontal_move = player_right * (side_input * 1.5f * delta_time);
         }
@@ -219,10 +226,14 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
         {
             float forward_input = 0.0f;
             float strafe_input = 0.0f;
-            if (g_WPressed) forward_input += 1.0f;
-            if (g_SPressed) forward_input -= 1.0f;
-            if (g_DPressed) strafe_input -= 1.0f;
-            if (g_APressed) strafe_input += 1.0f;
+            if (g_WPressed)
+                forward_input += 1.0f;
+            if (g_SPressed)
+                forward_input -= 1.0f;
+            if (g_DPressed)
+                strafe_input -= 1.0f;
+            if (g_APressed)
+                strafe_input += 1.0f;
 
             glm::vec4 move_direction =
                 g_LockOnMovementForward * forward_input +
@@ -243,14 +254,18 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
         else
         {
             const float turn_speed = 2.1f;
-            if (g_APressed) g_PlayerYaw -= turn_speed * delta_time;
-            if (g_DPressed) g_PlayerYaw += turn_speed * delta_time;
+            if (g_APressed)
+                g_PlayerYaw -= turn_speed * delta_time;
+            if (g_DPressed)
+                g_PlayerYaw += turn_speed * delta_time;
 
             const glm::vec4 player_back(std::sin(g_PlayerYaw), 0.0f, -std::cos(g_PlayerYaw), 0.0f);
             const glm::vec4 player_forward = -player_back;
 
-            if (g_WPressed) move_input += 1.0f;
-            if (g_SPressed) move_input -= 1.0f;
+            if (g_WPressed)
+                move_input += 1.0f;
+            if (g_SPressed)
+                move_input -= 1.0f;
             horizontal_move = player_forward * (move_input * move_speed * delta_time);
         }
 
@@ -322,7 +337,7 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
         }
 
         // Quebrar cobweb quando o player cai/pisa sobre ela
-        if (g_PlayerVerticalVelocity < 0.0f)
+        if (g_PlayerVerticalVelocity < 5.0f)
         {
             CollisionAABB obb_aabb = ComputeObbAabb(test_obb);
             bool broke_any = false;
@@ -421,7 +436,7 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
             {
                 float dx = cw.bbox_center.x - center.x;
                 float dz = cw.bbox_center.z - center.z;
-        if (dx * dx + dz * dz < 1.0f)
+                if (dx * dx + dz * dz < 1.0f)
                 {
                     cw.broken = true;
                     printf("Cobweb quebrada em (%.1f, %.1f, %.1f)!\n",
@@ -431,7 +446,7 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
             }
         }
     }
-    
+
     CollisionOBB real_obb = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
     CollisionShapeType real_col = CollidesWithScenarioObb(real_obb, g_ScenarioCollisionShapes);
     g_PlayerCubeColliding = (real_col == CollisionShapeType::SOLID || real_col == CollisionShapeType::DOOR || real_col == CollisionShapeType::WATER);
@@ -455,10 +470,13 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     static float ladderGraceTimer = 0.0f;
     const float grace_period = 0.3f;
 
-    if (g_IsClimbingAVine) {
-        if (!g_CollidedWithAVine) {
+    if (g_IsClimbingAVine)
+    {
+        if (!g_CollidedWithAVine)
+        {
             vineGraceTimer += delta_time;
-            if (vineGraceTimer > grace_period) {
+            if (vineGraceTimer > grace_period)
+            {
                 g_IsClimbingAVine = false;
                 vineGraceTimer = 0.0f;
                 CollisionOBB ground_test = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
@@ -468,14 +486,19 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
                 g_SpacePressed = false;
                 g_AttackPressed = false;
             }
-        } else {
+        }
+        else
+        {
             vineGraceTimer = 0.0f;
         }
     }
-    if (g_IsClimbingALadder) {
-        if (!g_CollidedWithALadder) {
+    if (g_IsClimbingALadder)
+    {
+        if (!g_CollidedWithALadder)
+        {
             ladderGraceTimer += delta_time;
-            if (ladderGraceTimer > grace_period) {
+            if (ladderGraceTimer > grace_period)
+            {
                 g_IsClimbingALadder = false;
                 ladderGraceTimer = 0.0f;
                 CollisionOBB ground_test = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
@@ -485,7 +508,9 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
                 g_SpacePressed = false;
                 g_AttackPressed = false;
             }
-        } else {
+        }
+        else
+        {
             ladderGraceTimer = 0.0f;
         }
     }
@@ -527,7 +552,8 @@ void SnapPlayerToNearestVine()
             glm::vec4 e2 = tri.v3 - tri.v1;
             glm::vec4 n = crossproduct(e1, e2);
             float nlen = std::sqrt(dotproduct(n, n));
-            if (nlen < 1e-6f) continue;
+            if (nlen < 1e-6f)
+                continue;
             n = n / nlen;
             n.w = 0.0f;
 
@@ -540,7 +566,8 @@ void SnapPlayerToNearestVine()
             float dot11 = dotproduct(e2, e2);
             float dot01 = dotproduct(e1, e2);
             float denom = dot00 * dot11 - dot01 * dot01;
-            if (std::abs(denom) < 1e-6f) continue;
+            if (std::abs(denom) < 1e-6f)
+                continue;
             float u = (d1 * dot11 - d2 * dot01) / denom;
             float v = (d2 * dot00 - d1 * dot01) / denom;
             u = std::max(0.0f, std::min(1.0f, u));
