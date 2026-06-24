@@ -18,7 +18,7 @@ const float step_subdiv = 0.04f;
 static bool IsCobwebBroken(const CollisionShape &shape)
 {
     glm::vec4 center = (shape.bbox_min + shape.bbox_max) * 0.5f;
-    for (const auto &cw : g_Cobwebs)
+    for (const auto &cw : g_Cobwebs)    
     {
         if (!cw.broken)
             continue;
@@ -293,6 +293,15 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     {
         CollisionOBB test_obb = {test_pos_y, g_PlayerCubeHalfExtents, g_PlayerYaw};
         CollisionShapeType block_col = CollidesWithScenarioObb(test_obb, g_ScenarioCollisionShapes);
+
+        // Debug: log quando o jogador colide com algo caindo
+        if (g_PlayerVerticalVelocity < -0.1f)
+        {
+            printf("[COBWEB DEBUG] yFree=false velY=%.2f block_col=%d pos_y=%.2f test_y=%.2f\n",
+                   g_PlayerVerticalVelocity, (int)block_col,
+                   updated_position.y, test_pos_y.y);
+        }
+
         if (block_col == CollisionShapeType::DOOR)
         {
             CollisionAABB obb_aabb = ComputeObbAabb(test_obb);
@@ -310,6 +319,41 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
                        cs.bbox_max.x, cs.bbox_max.y, cs.bbox_max.z,
                        cs.triangles.size());
             }
+        }
+
+        // Quebrar cobweb quando o player cai/pisa sobre ela
+        if (g_PlayerVerticalVelocity < 0.0f)
+        {
+            CollisionAABB obb_aabb = ComputeObbAabb(test_obb);
+            bool broke_any = false;
+            for (size_t i = 0; i < g_ScenarioCollisionShapes.size(); ++i)
+            {
+                const auto &cs = g_ScenarioCollisionShapes[i];
+                if (cs.type != CollisionShapeType::COBWEB_FLOORHOLE)
+                    continue;
+                if (IsCobwebBroken(cs))
+                    continue;
+                CollisionAABB shape_aabb = {cs.bbox_min, cs.bbox_max};
+                if (!AabbAabbIntersect(obb_aabb, shape_aabb))
+                    continue;
+
+                glm::vec4 center = (cs.bbox_min + cs.bbox_max) * 0.5f;
+                for (auto &cw : g_Cobwebs)
+                {
+                    float dx = cw.bbox_center.x - center.x;
+                    float dz = cw.bbox_center.z - center.z;
+                    if (dx * dx + dz * dz < 1.0f)
+                    {
+                        cw.broken = true;
+                        broke_any = true;
+                        printf("Cobweb quebrada em (%.1f, %.1f, %.1f)!\n",
+                               cw.bbox_center.x, cw.bbox_center.y, cw.bbox_center.z);
+                        break;
+                    }
+                }
+            }
+            if (broke_any)
+                yFree = IsPositionFree(test_pos_y, g_PlayerCubeHalfExtents, g_PlayerYaw);
         }
     }
 

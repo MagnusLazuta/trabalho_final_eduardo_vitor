@@ -433,6 +433,10 @@ float g_ShieldModelScale = 1.0f;
 // Attachments (sistema de anexo de objetos aos ossos)
 ModelAttachment *g_SwordAttachment = nullptr;
 ModelAttachment *g_ShieldAttachment = nullptr;
+ModelAttachment *g_SlingshotAttachment = nullptr;
+std::vector<std::string> g_SlingshotObjectNames;
+bool g_SlingshotEquipped = false;
+bool g_SlingshotTuningMode = false;
 
 // Animações
 
@@ -1321,6 +1325,13 @@ static void EnterThirdPersonCamera()
     g_CameraInitialized = false;
     g_CurrentThirdPersonCameraDistance = g_ThirdPersonCameraDistance;
     ResetSlingshotState();
+    if (g_SlingshotEquipped)
+    {
+        g_SlingshotEquipped = false;
+        SetAttachmentVisible(g_SwordAttachment, true);
+        SetAttachmentVisible(g_ShieldAttachment, true);
+        SetAttachmentVisible(g_SlingshotAttachment, false);
+    }
 }
 
 static void EnterFirstPersonCamera()
@@ -1332,6 +1343,14 @@ static void EnterFirstPersonCamera()
     g_LockOnMovementActive = false;
     g_CameraInitialized = false;
     g_CurrentThirdPersonCameraDistance = g_ThirdPersonCameraDistance;
+
+    if (g_SlingshotEquipped)
+    {
+        g_SlingshotEquipped = false;
+        SetAttachmentVisible(g_SwordAttachment, true);
+        SetAttachmentVisible(g_ShieldAttachment, true);
+        SetAttachmentVisible(g_SlingshotAttachment, false);
+    }
 
     g_WPressed = false;
     g_APressed = false;
@@ -1424,7 +1443,9 @@ static bool TryEnterLockOnCamera()
     const int target_enemy = QueryClosestLockOnEnemy(g_PlayerCubePosition, LOCK_ON_RADIUS, LOCK_ON_MAX_HEIGHT_DELTA);
     if (target_enemy < 0)
     {
-        std::printf("[LOCK_ON] No valid enemy within %.1f units and %.1f height.\n", LOCK_ON_RADIUS, LOCK_ON_MAX_HEIGHT_DELTA);
+        g_CameraYaw = g_PlayerYaw;
+        g_CameraInitialized = false;
+        std::printf("[LOCK_ON] No valid enemy — camera recentered behind player.\n");
         return false;
     }
 
@@ -1438,6 +1459,45 @@ static bool TryEnterLockOnCamera()
     ResetSlingshotState();
     std::printf("[LOCK_ON] Target enemy %d acquired.\n", g_LockOnTargetEnemyIndex);
     return true;
+}
+
+static void CycleLockOnTarget(int direction)
+{
+    const int new_index = QueryNextLockOnEnemy(g_PlayerCubePosition, LOCK_ON_RADIUS,
+                                                LOCK_ON_MAX_HEIGHT_DELTA,
+                                                g_LockOnTargetEnemyIndex, direction);
+    if (new_index >= 0)
+    {
+        g_LockOnTargetEnemyIndex = new_index;
+        std::printf("[LOCK_ON] Switched to enemy %d.\n", new_index);
+    }
+    else
+    {
+        std::printf("[LOCK_ON] No other valid enemies in range.\n");
+    }
+}
+
+static void ToggleSlingshotEquip()
+{
+    g_SlingshotEquipped = !g_SlingshotEquipped;
+    ResetSlingshotState();
+
+    if (g_SlingshotEquipped)
+    {
+        g_AttackPressed = false;
+        g_DefendPressed = false;
+        SetAttachmentVisible(g_SwordAttachment, false);
+        SetAttachmentVisible(g_ShieldAttachment, false);
+        SetAttachmentVisible(g_SlingshotAttachment, true);
+        std::printf("[TAB] Slingshot equipped — sword and shield unequipped.\n");
+    }
+    else
+    {
+        SetAttachmentVisible(g_SwordAttachment, true);
+        SetAttachmentVisible(g_ShieldAttachment, true);
+        SetAttachmentVisible(g_SlingshotAttachment, false);
+        std::printf("[TAB] Sword and shield re-equipped.\n");
+    }
 }
 
 static bool UpdateLockOnCamera(float delta_time)
@@ -1649,6 +1709,72 @@ static void UpdateSlingshotProjectile(float delta_time)
         SpawnSlingshotImpact(g_SlingshotProjectile.position);
         g_SlingshotProjectile.is_active = false;
     }
+}
+
+static void DrawSlingshotReticle()
+{
+    if (!g_SlingshotEquipped || !g_FirstPersonCamera)
+        return;
+
+    static GLuint reticle_vao = 0, reticle_vbo = 0;
+    if (reticle_vao == 0)
+    {
+        const float half = 0.018f;
+        const float gap = 0.005f;
+        const float nx = 0.707f; // normal toward light
+        const float ny = 0.707f;
+        // position(3) + normal(3) + texcoord(2) = 8 floats per vertex
+        const float vertices[] = {
+            -half, 0.0f, 0.0f,  nx, ny, 0.0f,  0.0f, 0.0f,
+             -gap, 0.0f, 0.0f,  nx, ny, 0.0f,  0.0f, 0.0f,
+              gap, 0.0f, 0.0f,  nx, ny, 0.0f,  0.0f, 0.0f,
+             half, 0.0f, 0.0f,  nx, ny, 0.0f,  0.0f, 0.0f,
+             0.0f,  half, 0.0f, nx, ny, 0.0f,  0.0f, 0.0f,
+             0.0f,   gap, 0.0f, nx, ny, 0.0f,  0.0f, 0.0f,
+             0.0f,  -gap, 0.0f, nx, ny, 0.0f,  0.0f, 0.0f,
+             0.0f, -half, 0.0f, nx, ny, 0.0f,  0.0f, 0.0f,
+        };
+        const int stride = 8 * sizeof(float);
+
+        glGenVertexArrays(1, &reticle_vao);
+        glBindVertexArray(reticle_vao);
+        glGenBuffers(1, &reticle_vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, reticle_vbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+        // location 0: position (vec4 with w=1 implicit)
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void *)0);
+        glEnableVertexAttribArray(0);
+        // location 1: normal
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void *)(3 * sizeof(float)));
+        glEnableVertexAttribArray(1);
+        // location 2: texcoord
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, (void *)(6 * sizeof(float)));
+        glEnableVertexAttribArray(2);
+        glBindVertexArray(0);
+    }
+
+    glUseProgram(g_GpuProgramID);
+
+    const glm::mat4 identity(1.0f);
+    const glm::mat4 ortho = glm::ortho(-1.0f, 1.0f, -1.0f, 1.0f, -1.0f, 1.0f);
+    glUniformMatrix4fv(g_projection_uniform, 1, GL_FALSE, glm::value_ptr(ortho));
+    glUniformMatrix4fv(g_view_uniform, 1, GL_FALSE, glm::value_ptr(identity));
+    glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(identity));
+    glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE, glm::value_ptr(identity));
+    glUniform1i(g_use_animation_uniform, 0);
+    glUniform1i(g_is_weapon_uniform, 0);
+    glUniform1i(g_has_player_texture_uniform, 0);
+    glUniform1i(g_cube_colliding_uniform, 0);
+    glUniform1i(g_object_id_uniform, -1);
+    glUniform3f(g_object_tint_uniform, 1.0f, 1.0f, 1.0f);
+    glUniform3f(g_material_diffuse_uniform, 1.0f, 1.0f, 1.0f);
+    glUniform3f(g_material_ambient_uniform, 1.0f, 1.0f, 1.0f);
+
+    glDisable(GL_DEPTH_TEST);
+    glBindVertexArray(reticle_vao);
+    glDrawArrays(GL_LINES, 0, 8);
+    glBindVertexArray(0);
+    glEnable(GL_DEPTH_TEST);
 }
 
 static void CheckSwordEnemyCollisions(float delta_time)
@@ -2916,6 +3042,33 @@ int main()
         g_ShieldAttachment->localRotationDeg = g_ShieldRotationDeg;
     }
 
+    const std::string slingshot_model_path = ResolveScene00Path("../../assets/char/estilingue.obj", "assets/char/estilingue.obj");
+    {
+        std::set<std::string> names_before;
+        for (auto &[name, obj] : g_VirtualScene)
+            names_before.insert(name);
+
+        ObjModel slingshot_model(slingshot_model_path.c_str());
+        ComputeNormals(&slingshot_model);
+        BuildTrianglesAndAddToVirtualScene(&slingshot_model, g_DefaultGrayTextureID);
+
+        for (auto &[name, obj] : g_VirtualScene)
+        {
+            if (names_before.find(name) == names_before.end())
+                g_SlingshotObjectNames.push_back(name);
+        }
+    }
+
+    g_SlingshotAttachment = CreateAttachment("slingshot", "mixamorig:RightHand", g_SlingshotObjectNames);
+    if (g_SlingshotAttachment)
+    {
+        g_SlingshotAttachment->localPosition = glm::vec3(53.0f, -63.0f, -23.0f);
+        g_SlingshotAttachment->localRotationDeg = glm::vec3(330.0f, 790.0f, 280.0f);
+        g_SlingshotAttachment->visible = false;
+    }
+    printf("Slingshot loaded: %zu objects\n", g_SlingshotObjectNames.size());
+    for (const auto &n : g_SlingshotObjectNames) printf("  slingshot obj: '%s'\n", n.c_str());
+
     BuildTrianglesFromAssimpAndAddToVirtualScene(g_PlayerModelLoader);
     
     // Calcula o AABB do modelo do personagem
@@ -3538,9 +3691,20 @@ int main()
                 ? camera_view_vector / camera_view_length
                 : glm::vec4(0.0f, 0.0f, -1.0f, 0.0f);
 
-        if (g_SlingshotState.fire_requested && g_FirstPersonCamera)
+        if (g_SlingshotState.fire_requested && (g_FirstPersonCamera || g_SlingshotEquipped))
         {
-            FireSlingshotProjectile(camera_position_c, projectile_view_direction);
+            if (g_SlingshotEquipped && !g_FirstPersonCamera)
+            {
+                const glm::vec4 slingshot_dir = ComputePlayerForwardFromYaw(g_PlayerYaw);
+                const glm::vec4 slingshot_spawn = g_PlayerCubePosition
+                    + slingshot_dir * 0.6f
+                    + glm::vec4(0.0f, g_PlayerCubeHalfExtents.y * 1.2f, 0.0f, 0.0f);
+                FireSlingshotProjectile(slingshot_spawn, slingshot_dir);
+            }
+            else
+            {
+                FireSlingshotProjectile(camera_position_c, projectile_view_direction);
+            }
         }
 
         UpdateSlingshotProjectile(delta_time);
@@ -3603,7 +3767,8 @@ int main()
                     if (name_str.find("DOOR") != std::string::npos ||
                         name_str.find("door") != std::string::npos ||
                         name_str.find("CHEST") != std::string::npos ||
-                        name_str.find("chest") != std::string::npos)
+                        name_str.find("chest") != std::string::npos ||
+                        name_str.find("COBWEB_FLOORHOLE") != std::string::npos)
                         continue;
                 }
 
@@ -3824,7 +3989,7 @@ int main()
 
                 if (freezeAtEnd && g_PlayerAnimationTime >= durSec - 0.01f) {
                     // Já chegou ao fim, mantém no último frame
-                } else {
+                } else if (!g_SlingshotTuningMode) {
                     g_PlayerAnimationTime += delta_time * g_AnimationSpeedMultiplier;
                 }
 
@@ -4003,6 +4168,12 @@ int main()
                                g_ShieldAttachment->boneName.c_str(),
                                g_ShieldAttachment->localPosition.x, g_ShieldAttachment->localPosition.y, g_ShieldAttachment->localPosition.z,
                                g_ShieldAttachment->localRotationDeg.x, g_ShieldAttachment->localRotationDeg.y, g_ShieldAttachment->localRotationDeg.z);
+                    if (g_SlingshotAttachment)
+                        printf("  Slingshot bone='%s' pos=(%.1f,%.1f,%.1f) rot=(%.0f,%.0f,%.0f) visible=%d\n",
+                               g_SlingshotAttachment->boneName.c_str(),
+                               g_SlingshotAttachment->localPosition.x, g_SlingshotAttachment->localPosition.y, g_SlingshotAttachment->localPosition.z,
+                               g_SlingshotAttachment->localRotationDeg.x, g_SlingshotAttachment->localRotationDeg.y, g_SlingshotAttachment->localRotationDeg.z,
+                               g_SlingshotAttachment->visible ? 1 : 0);
                 }
 
                 glUniform1i(g_has_player_texture_uniform, g_HasPlayerTexture ? 1 : 0);
@@ -4219,6 +4390,8 @@ int main()
         // Imprimimos na tela informação sobre o número de quadros renderizados
         // por segundo (frames per second).
         TextRendering_ShowFramesPerSecond(window);
+
+        DrawSlingshotReticle();
 
         // O framebuffer onde OpenGL executa as operações de renderização não
         // é o mesmo que está sendo mostrado para o usuário, caso contrário
@@ -5604,7 +5777,7 @@ void MouseButtonCallback(GLFWwindow *window, int button, int action, int mods)
             g_CameraTheta = std::atan2(-camera_view_vector.x, camera_view_vector.z);
         }
 
-        if (g_FirstPersonCamera)
+        if (g_FirstPersonCamera || g_SlingshotEquipped)
         {
             BeginSlingshotCharge();
         }
@@ -5615,7 +5788,7 @@ void MouseButtonCallback(GLFWwindow *window, int button, int action, int mods)
         // variável abaixo para false.
         g_LeftMouseButtonPressed = false;
 
-        if (g_FirstPersonCamera && g_SlingshotState.is_charging)
+        if ((g_FirstPersonCamera || g_SlingshotEquipped) && g_SlingshotState.is_charging)
         {
             QueueSlingshotShot();
         }
@@ -5746,6 +5919,14 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
             TryEnterLockOnCamera();
     }
 
+    if (g_CameraMode == CameraMode::LockOn && action == GLFW_PRESS)
+    {
+        if (key == GLFW_KEY_RIGHT)
+            CycleLockOnTarget(+1);
+        else if (key == GLFW_KEY_LEFT)
+            CycleLockOnTarget(-1);
+    }
+
     // Se o usuário apertar a tecla R, recarregamos os shaders dos arquivos "shader_fragment.glsl" e "shader_vertex.glsl".
     if (key == GLFW_KEY_R && action == GLFW_PRESS)
     {
@@ -5763,6 +5944,64 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
                 g_ShowPlayerCoords ? "ON" : "OFF",
                 g_ShowDebugHitboxes ? "ON" : "OFF");
         fflush(stdout);
+    }
+
+    // F2 toggles slingshot tuning mode
+    if (key == GLFW_KEY_F2 && action == GLFW_PRESS)
+    {
+        g_SlingshotTuningMode = !g_SlingshotTuningMode;
+        if (g_SlingshotTuningMode)
+        {
+            SetAttachmentVisible(g_SlingshotAttachment, true);
+            printf("[F2] Slingshot tuning mode ON.\n");
+            printf("     WASD = pos X/Z,  Q/E = height Y\n");
+            printf("     Arrows = rot X/Y,  R/F = roll Z\n");
+            printf("     SHIFT = fast,  SPACE = print values,  F2 = exit\n");
+        }
+        else
+        {
+            if (!g_SlingshotEquipped)
+                SetAttachmentVisible(g_SlingshotAttachment, false);
+            printf("[F2] Slingshot tuning mode OFF.\n");
+        }
+        fflush(stdout);
+    }
+
+    // Slingshot tuning controls — consume key and return early
+    if (g_SlingshotTuningMode && action != GLFW_RELEASE)
+    {
+        const float pos_step = (mod & GLFW_MOD_SHIFT) ? 10.0f : 1.0f;
+        const float rot_step = (mod & GLFW_MOD_SHIFT) ? 15.0f : 5.0f;
+
+        if (g_SlingshotAttachment)
+        {
+            if (key == GLFW_KEY_W)      g_SlingshotAttachment->localPosition.z -= pos_step;
+            if (key == GLFW_KEY_S)      g_SlingshotAttachment->localPosition.z += pos_step;
+            if (key == GLFW_KEY_A)      g_SlingshotAttachment->localPosition.x -= pos_step;
+            if (key == GLFW_KEY_D)      g_SlingshotAttachment->localPosition.x += pos_step;
+            if (key == GLFW_KEY_Q)      g_SlingshotAttachment->localPosition.y -= pos_step;
+            if (key == GLFW_KEY_E)      g_SlingshotAttachment->localPosition.y += pos_step;
+            if (key == GLFW_KEY_UP)     g_SlingshotAttachment->localRotationDeg.x -= rot_step;
+            if (key == GLFW_KEY_DOWN)   g_SlingshotAttachment->localRotationDeg.x += rot_step;
+            if (key == GLFW_KEY_LEFT)   g_SlingshotAttachment->localRotationDeg.y -= rot_step;
+            if (key == GLFW_KEY_RIGHT)  g_SlingshotAttachment->localRotationDeg.y += rot_step;
+            if (key == GLFW_KEY_R)      g_SlingshotAttachment->localRotationDeg.z -= rot_step;
+            if (key == GLFW_KEY_F)      g_SlingshotAttachment->localRotationDeg.z += rot_step;
+        }
+
+        if (key == GLFW_KEY_SPACE && action == GLFW_PRESS && g_SlingshotAttachment)
+        {
+            printf("[SLINGSHOT] pos=(%.1f, %.1f, %.1f)  rot=(%.1f, %.1f, %.1f)\n",
+                   g_SlingshotAttachment->localPosition.x,
+                   g_SlingshotAttachment->localPosition.y,
+                   g_SlingshotAttachment->localPosition.z,
+                   g_SlingshotAttachment->localRotationDeg.x,
+                   g_SlingshotAttachment->localRotationDeg.y,
+                   g_SlingshotAttachment->localRotationDeg.z);
+            fflush(stdout);
+        }
+
+        return; // consume key — skip normal gameplay input
     }
 
     // O = iniciar/parar escalada (vine ou ladder)
@@ -5816,6 +6055,9 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
     }
 
     // Atualiza flags de input para movimento (desabilitado em primeira pessoa)
+    if (key == GLFW_KEY_TAB && action == GLFW_PRESS)
+        ToggleSlingshotEquip();
+
     if (key == GLFW_KEY_W)
         g_WPressed = (action != GLFW_RELEASE) && !g_FirstPersonCamera;
     if (key == GLFW_KEY_A)
@@ -5829,9 +6071,9 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
     if (key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT)
         g_ShiftPressed = (action != GLFW_RELEASE);
     if (key == GLFW_KEY_E)
-        g_AttackPressed = (action == GLFW_PRESS);
+        g_AttackPressed = (action == GLFW_PRESS) && !g_SlingshotEquipped;
     if (key == GLFW_KEY_Q)
-        g_DefendPressed = (action != GLFW_RELEASE);
+        g_DefendPressed = (action != GLFW_RELEASE) && !g_SlingshotEquipped;
 
     if (key == GLFW_KEY_ENTER)
         g_EnterPressed = (action == GLFW_PRESS);

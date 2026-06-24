@@ -1499,6 +1499,23 @@ int QueryClosestLockOnEnemy(const glm::vec4 &player_position, float radius, floa
     return closest_index;
 }
 
+int QueryNextLockOnEnemy(const glm::vec4 &player_position, float radius, float max_height_delta, int current_index, int direction)
+{
+    if (g_Enemies.empty())
+        return -1;
+
+    const int count = static_cast<int>(g_Enemies.size());
+    int index = current_index;
+    for (int i = 1; i <= count; ++i)
+    {
+        index = ((current_index + direction * i) % count + count) % count;
+        const Enemy &enemy = g_Enemies[index];
+        if (IsValidLockOnTarget(enemy) && IsEnemyWithinLockOnRange(enemy, player_position, radius, max_height_delta))
+            return index;
+    }
+    return -1;
+}
+
 bool QueryEnemyLockOnTargetPosition(int enemy_index, const glm::vec4 &player_position, float radius, float max_height_delta, glm::vec4 &target_position)
 {
     if (enemy_index < 0 || enemy_index >= static_cast<int>(g_Enemies.size()))
