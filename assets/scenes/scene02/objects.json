@@ -1,3 +1,37 @@
 {
-  "objects": []
+  "objects": [
+    {
+      "model": "chest.obj",
+      "type": "CHEST",
+      "position": [
+        30.320063,
+        11.00738,
+        30.952964
+      ],
+      "rotation": [
+        0.02,
+        0.01,
+        0.04
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "interactive": true,
+      "collision_type": "SOLID",
+      "aabb": {
+        "min": [
+          29.54314,
+          10.658888,
+          30.184929
+        ],
+        "max": [
+          31.096987,
+          11.355872,
+          31.720999
+        ]
+      }
+    }
+  ]
 }

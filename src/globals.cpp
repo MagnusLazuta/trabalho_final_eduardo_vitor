@@ -35,3 +35,8 @@ PlayerStateMachine g_PlayerStateMachine;
 
 std::vector<DoorInstance> g_Doors;
 bool g_EnterPressed = false;
+
+std::vector<ChestInstance> g_Chests;
+
+std::vector<CobwebInstance> g_Cobwebs;
+float g_CobwebFallSpeedThreshold = -7.0f;

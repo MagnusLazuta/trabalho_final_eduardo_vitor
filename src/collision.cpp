@@ -392,7 +392,20 @@ int FindDoorIndexByBBox(const glm::vec4 &bbox_center, const std::vector<DoorInst
         float dx = doors[i].bbox_center.x - bbox_center.x;
         float dy = doors[i].bbox_center.y - bbox_center.y;
         float dz = doors[i].bbox_center.z - bbox_center.z;
-        if (dx * dx + dy * dy + dz * dz < 0.01f)
+        if (dx * dx + dy * dy + dz * dz < 1.0f)
+            return (int)i;
+    }
+    return -1;
+}
+
+int FindChestIndexByBBox(const glm::vec4 &bbox_center, const std::vector<ChestInstance> &chests)
+{
+    for (size_t i = 0; i < chests.size(); ++i)
+    {
+        float dx = chests[i].bbox_center.x - bbox_center.x;
+        float dy = chests[i].bbox_center.y - bbox_center.y;
+        float dz = chests[i].bbox_center.z - bbox_center.z;
+        if (dx * dx + dy * dy + dz * dz < 4.0f)
             return (int)i;
     }
     return -1;

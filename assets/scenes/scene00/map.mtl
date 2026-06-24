@@ -1,4 +1,4 @@
-# Blender 4.0.2 MTL File: 'None'
+# Blender 5.1.1 MTL File: 'scene00.blend'
 # www.blender.org
 
 newmtl dg01_hgo_01_0.004
@@ -81,6 +81,36 @@ d 1.000000
 illum 2
 map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_kiri_03_k_1e300.png
 
+newmtl dg01_kumo_01_2__0.004
+Ns 1000.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.000000 0.000000 0.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 1
+map_Kd /home/edulazuta/hyrule/inside_the_deku_tree/props/dg01_kumo_01_2__0.png
+
+newmtl dg01_kumo_01_2__0.006
+Ns 1000.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.000000 0.000000 0.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 1
+map_Kd /home/edulazuta/hyrule/inside_the_deku_tree/props/dg01_kumo_01_2__0.png
+
+newmtl dg01_kumo_01_2__0.007
+Ns 1000.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.000000 0.000000 0.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 1
+map_Kd /home/edulazuta/hyrule/inside_the_deku_tree/props/dg01_kumo_01_2__0.png
+
 newmtl dg01_kumo_01_2__23700.004
 Ns 250.000000
 Ka 1.000000 1.000000 1.000000
@@ -90,6 +120,36 @@ Ni 1.500000
 d 1.000000
 illum 2
 map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_kumo_01_2__23700.png
+
+newmtl dg01_kumo_01_2__A800.004
+Ns 1000.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.000000 0.000000 0.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 1
+map_Kd /home/edulazuta/hyrule/inside_the_deku_tree/props/dg01_kumo_01_2__a800.png
+
+newmtl dg01_kumo_01_2__A800.006
+Ns 1000.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.000000 0.000000 0.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 1
+map_Kd /home/edulazuta/hyrule/inside_the_deku_tree/props/dg01_kumo_01_2__a800.png
+
+newmtl dg01_kumo_01_2__A800.007
+Ns 1000.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.000000 0.000000 0.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 1
+map_Kd /home/edulazuta/hyrule/inside_the_deku_tree/props/dg01_kumo_01_2__a800.png
 
 newmtl dg01_tuta_01_k_2F380.004
 Ns 250.000000
@@ -121,7 +181,27 @@ d 1.000000
 illum 2
 map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_yuka_00_59400.png
 
-newmtl ydan_tdoor_t_mo_0.001
+newmtl ydan_spyuka_mod_0
+Ns 1000.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.000000 0.000000 0.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 1
+map_Kd /home/edulazuta/hyrule/inside_the_deku_tree/props/ydan_spyuka_mod_0.png
+
+newmtl ydan_tdoor_t_mo_0.002
+Ns 1000.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.000000 0.000000 0.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.450000
+d 1.000000
+illum 1
+map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/ydan_tdoor_t_mo_0.png
+
+newmtl ydan_tdoor_t_mo_0.003
 Ns 1000.000000
 Ka 1.000000 1.000000 1.000000
 Ks 0.000000 0.000000 0.000000

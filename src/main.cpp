@@ -1173,6 +1173,8 @@ CollisionShape BuildCollisionShapeFromInstance(const SceneObjectInstance& inst)
         shape.type = CollisionShapeType::LADDER;
     else if (inst.collision_type == "WATER")
         shape.type = CollisionShapeType::WATER;
+    else if (inst.collision_type == "COBWEB_FLOORHOLE")
+        shape.type = CollisionShapeType::COBWEB_FLOORHOLE;
     else if (inst.collision_type == "NONE")
         shape.type = CollisionShapeType::NONE;
     else
@@ -1187,30 +1189,32 @@ CollisionShape BuildCollisionShapeFromInstance(const SceneObjectInstance& inst)
     glm::mat4 model_matrix = T * Ry * Rx * Rz * S;
 
     // Carrega o .obj e extrai os triângulos reais (não uma caixa AABB fake)
-    ObjModel* obj_model = LoadOrGetCachedObjModel(inst.model_path);
+    ObjModel* obj_model = nullptr;
+    glm::vec4 temp_min(0.0f), temp_max(0.0f);
+    if (!inst.model_path.empty())
+        obj_model = LoadOrGetCachedObjModel(inst.model_path);
     if (obj_model && !obj_model->shapes.empty())
     {
         std::vector<CollisionShape> temp_shapes;
-        glm::vec4 temp_min, temp_max;
         BuildCollisionDataIntoVector(obj_model, model_matrix, temp_shapes, temp_min, temp_max);
 
-        // Usa os triângulos reais, mas com o tipo do JSON
         for (auto& s : temp_shapes)
         {
             s.type = shape.type;
             shape.triangles.insert(shape.triangles.end(), s.triangles.begin(), s.triangles.end());
-            shape.bbox_min.x = std::min(shape.bbox_min.x, s.bbox_min.x);
-            shape.bbox_min.y = std::min(shape.bbox_min.y, s.bbox_min.y);
-            shape.bbox_min.z = std::min(shape.bbox_min.z, s.bbox_min.z);
-            shape.bbox_max.x = std::max(shape.bbox_max.x, s.bbox_max.x);
-            shape.bbox_max.y = std::max(shape.bbox_max.y, s.bbox_max.y);
-            shape.bbox_max.z = std::max(shape.bbox_max.z, s.bbox_max.z);
         }
     }
-    else
+
+    // Usa AABB do JSON (posicionamento correto no mundo)
+    if (inst.has_aabb)
     {
         shape.bbox_min = inst.aabb_min;
         shape.bbox_max = inst.aabb_max;
+    }
+    else if (!shape.triangles.empty())
+    {
+        shape.bbox_min = temp_min;
+        shape.bbox_max = temp_max;
     }
 
     return shape;
@@ -2318,7 +2322,8 @@ int main()
             char obj_prefix[128];
             snprintf(obj_prefix, sizeof(obj_prefix), "scene%02d_json_%zu_", scene_idx, i);
 
-            // Adiciona ao g_VirtualScene
+            // Adiciona ao g_VirtualScene — salva nomes originais e restaura depois
+            // (obj_model é cacheado, não podemos deixar os nomes modificados)
             std::vector<std::string> original_names;
             original_names.reserve(obj_model->shapes.size());
             for (auto& shape : obj_model->shapes)
@@ -2329,6 +2334,10 @@ int main()
 
             BuildTrianglesAndAddToVirtualScene(obj_model, g_DefaultGrayTextureID);
 
+            // Restaura nomes originais para não corromper o cache
+            for (size_t s = 0; s < obj_model->shapes.size(); ++s)
+                obj_model->shapes[s].name = original_names[s];
+
             // Adiciona nomes à lista de renderização da cena
             for (auto& [name, obj] : g_VirtualScene)
             {
@@ -2338,24 +2347,23 @@ int main()
         }
     }
 
-    // Coleta todas as portas (DOOR) de todas as cenas (incluindo do JSON)
+    // Coleta todas as portas (DOOR) apenas do objects.json
     g_Doors.clear();
-    for (size_t part_idx = 0; part_idx < g_SceneParts.size(); ++part_idx)
+    for (auto &[scene_idx, instances] : g_SceneObjectInstances)
     {
-        for (size_t si = 0; si < g_SceneParts[part_idx].collision_shapes.size(); ++si)
+        for (size_t i = 0; i < instances.size(); ++i)
         {
-            const CollisionShape &cs = g_SceneParts[part_idx].collision_shapes[si];
-            if (cs.type == CollisionShapeType::DOOR)
+            if (instances[i].collision_type == "DOOR")
             {
                 DoorInstance door;
                 door.state = DoorState::CLOSED;
                 door.current_y_offset = 0.0f;
                 door.open_timer = 0.0f;
-                door.bbox_center = (cs.bbox_min + cs.bbox_max) * 0.5f;
-                door.bbox_min = cs.bbox_min;
-                door.bbox_max = cs.bbox_max;
-                door.original_triangles = cs.triangles;
-                door.target_height = cs.bbox_max.y - cs.bbox_min.y;
+                door.bbox_center = glm::vec4(instances[i].position.x, instances[i].position.y, instances[i].position.z, 1.0f);
+                door.bbox_min = instances[i].aabb_min;
+                door.bbox_max = instances[i].aabb_max;
+                door.original_triangles = {};
+                door.target_height = door.bbox_max.y - door.bbox_min.y;
                 if (door.target_height < 0.5f)
                     door.target_height = 2.0f;
                 g_Doors.push_back(door);
@@ -2366,6 +2374,51 @@ int main()
         }
     }
     printf("Total de portas: %zu\n", g_Doors.size());
+
+    // Coleta todos os baus (CHEST) apenas do objects.json
+    g_Chests.clear();
+    for (auto &[scene_idx, instances] : g_SceneObjectInstances)
+    {
+        for (size_t i = 0; i < instances.size(); ++i)
+        {
+            if (instances[i].type == "CHEST")
+            {
+                ChestInstance chest;
+                chest.state = ChestState::CLOSED;
+                chest.current_lid_angle = 0.0f;
+                chest.open_timer = 0.0f;
+                chest.bbox_center = glm::vec4(instances[i].position.x, instances[i].position.y, instances[i].position.z, 1.0f);
+                chest.bbox_min = instances[i].aabb_min;
+                chest.bbox_max = instances[i].aabb_max;
+                g_Chests.push_back(chest);
+                printf("  Bau encontrado: center=(%.1f,%.1f,%.1f)\n",
+                       chest.bbox_center.x, chest.bbox_center.y, chest.bbox_center.z);
+            }
+        }
+    }
+    printf("Total de baus: %zu\n", g_Chests.size());
+
+    // Coleta todas as cobwebs (COBWEB_FLOORHOLE) de todas as cenas
+    g_Cobwebs.clear();
+    for (size_t part_idx = 0; part_idx < g_SceneParts.size(); ++part_idx)
+    {
+        for (size_t si = 0; si < g_SceneParts[part_idx].collision_shapes.size(); ++si)
+        {
+            const CollisionShape &cs = g_SceneParts[part_idx].collision_shapes[si];
+            if (cs.type == CollisionShapeType::COBWEB_FLOORHOLE)
+            {
+                CobwebInstance cw;
+                cw.broken = false;
+                cw.bbox_center = (cs.bbox_min + cs.bbox_max) * 0.5f;
+                cw.bbox_min = cs.bbox_min;
+                cw.bbox_max = cs.bbox_max;
+                g_Cobwebs.push_back(cw);
+                printf("  Cobweb encontrada: center=(%.1f,%.1f,%.1f)\n",
+                       cw.bbox_center.x, cw.bbox_center.y, cw.bbox_center.z);
+            }
+        }
+    }
+    printf("Total de cobwebs: %zu\n", g_Cobwebs.size());
 
     // Computa adjacencia entre as cenas (AABB overlap com margem)
     printf("\n=== Computando adjacencia entre cenas ===\n");
@@ -2977,22 +3030,31 @@ int main()
                 CollisionAABB obb_aabb = ComputeObbAabb(player_obb);
                 if (!AabbAabbIntersect(obb_aabb, shape_aabb))
                     continue;
-                // Encontrou porta proxima — inicia abertura
                 glm::vec4 center = (g_ScenarioCollisionShapes[si].bbox_min +
                                     g_ScenarioCollisionShapes[si].bbox_max) * 0.5f;
                 int door_idx = FindDoorIndexByBBox(center, g_Doors);
-                printf("[DOOR] ENTER! player=(%.2f,%.2f,%.2f) door_center=(%.2f,%.2f,%.2f) door_bbox=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f)\n",
-                       g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
-                       center.x, center.y, center.z,
-                       g_ScenarioCollisionShapes[si].bbox_min.x, g_ScenarioCollisionShapes[si].bbox_min.y, g_ScenarioCollisionShapes[si].bbox_min.z,
-                       g_ScenarioCollisionShapes[si].bbox_max.x, g_ScenarioCollisionShapes[si].bbox_max.y, g_ScenarioCollisionShapes[si].bbox_max.z);
                 if (door_idx >= 0 && g_Doors[door_idx].state == DoorState::CLOSED)
                 {
                     g_Doors[door_idx].state = DoorState::OPENING;
-                    printf("[DOOR] Abrindo porta em (%.1f,%.1f,%.1f)\n",
-                           center.x, center.y, center.z);
+                    break;
                 }
-                break;
+            }
+
+            // Detecta ENTER pressionado perto de um bau
+            for (size_t ci = 0; ci < g_Chests.size(); ++ci)
+            {
+                if (g_Chests[ci].state != ChestState::CLOSED)
+                    continue;
+                float dx = g_Chests[ci].bbox_center.x - g_PlayerCubePosition.x;
+                float dy = g_Chests[ci].bbox_center.y - g_PlayerCubePosition.y;
+                float dz = g_Chests[ci].bbox_center.z - g_PlayerCubePosition.z;
+                float dist_sq = dx * dx + dy * dy + dz * dz;
+                if (dist_sq < 4.0f)
+                {
+                    g_Chests[ci].state = ChestState::OPENING;
+                    printf("Bau abrindo!\n");
+                    break;
+                }
             }
         }
 
@@ -3000,27 +3062,6 @@ int main()
         const float door_speed = 3.0f;
         for (auto &door : g_Doors)
         {
-            // Log: lista todas as shapes na região da porta
-            static int shapeLogDone = 0;
-            if (door.state == DoorState::OPENING && shapeLogDone == 0)
-            {
-                shapeLogDone = 1;
-                printf("[DOOR SHAPES] Todas as shapes perto da porta center=(%.1f,%.1f,%.1f):\n",
-                       door.bbox_center.x, door.bbox_center.y, door.bbox_center.z);
-                for (size_t i = 0; i < g_ScenarioCollisionShapes.size(); ++i)
-                {
-                    const auto &cs = g_ScenarioCollisionShapes[i];
-                    CollisionAABB door_aabb = {door.bbox_min, door.bbox_max};
-                    CollisionAABB shape_aabb = {cs.bbox_min, cs.bbox_max};
-                    if (!AabbAabbIntersect(door_aabb, shape_aabb))
-                        continue;
-                    printf("  shape[%zu] type=%d bbox=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f) tris=%zu\n",
-                           i, (int)cs.type,
-                           cs.bbox_min.x, cs.bbox_min.y, cs.bbox_min.z,
-                           cs.bbox_max.x, cs.bbox_max.y, cs.bbox_max.z,
-                           cs.triangles.size());
-                }
-            }
             switch (door.state)
             {
             case DoorState::OPENING:
@@ -3033,7 +3074,6 @@ int main()
                     door.current_y_offset = door.target_height;
                     door.state = DoorState::OPEN;
                     door.open_timer = 5.0f;
-                    printf("[DOOR] Porta aberta, timer = 5.0s\n");
                 }
                 break;
             }
@@ -3043,7 +3083,6 @@ int main()
                 if (door.open_timer <= 0.0f)
                 {
                     door.state = DoorState::CLOSING;
-                    printf("[DOOR] Porta fechando\n");
                 }
                 break;
             }
@@ -3056,7 +3095,6 @@ int main()
                 {
                     door.current_y_offset = 0.0f;
                     door.state = DoorState::CLOSED;
-                    printf("[DOOR] Porta fechada\n");
                 }
                 break;
             }
@@ -3065,22 +3103,51 @@ int main()
             }
         }
 
-        // Log periódico do estado das portas
-        static int doorLogCounter = 0;
-        doorLogCounter++;
-        if (doorLogCounter % 60 == 0 && !g_Doors.empty())
+        // Atualiza animacao dos baus
+        const float chest_speed = 3.0f;
+        for (auto &chest : g_Chests)
         {
-            for (size_t di = 0; di < g_Doors.size(); ++di)
+            switch (chest.state)
             {
-                printf("[DOOR STATE] door[%zu] state=%d offset=%.3f timer=%.1f center=(%.1f,%.1f,%.1f)\n",
-                       di, (int)g_Doors[di].state, g_Doors[di].current_y_offset,
-                       g_Doors[di].open_timer,
-                       g_Doors[di].bbox_center.x, g_Doors[di].bbox_center.y, g_Doors[di].bbox_center.z);
+            case ChestState::OPENING:
+            {
+                chest.current_lid_angle = SmoothApproach(chest.current_lid_angle,
+                                                        chest.target_angle,
+                                                        chest_speed, delta_time);
+                if (chest.current_lid_angle >= chest.target_angle * 0.95f)
+                {
+                    chest.current_lid_angle = chest.target_angle;
+                    chest.state = ChestState::OPEN;
+                    chest.open_timer = 5.0f;
+                }
+                break;
             }
-            printf("[DOOR STATE] player=(%.2f,%.2f,%.2f) onGround=%d vel=%.2f\n",
-                   g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
-                   g_PlayerOnGround, g_PlayerVerticalVelocity);
+            case ChestState::OPEN:
+            {
+                chest.open_timer -= delta_time;
+                if (chest.open_timer <= 0.0f)
+                {
+                    chest.state = ChestState::CLOSING;
+                }
+                break;
+            }
+            case ChestState::CLOSING:
+            {
+                chest.current_lid_angle = SmoothApproach(chest.current_lid_angle,
+                                                        0.0f,
+                                                        chest_speed, delta_time);
+                if (chest.current_lid_angle <= 0.01f)
+                {
+                    chest.current_lid_angle = 0.0f;
+                    chest.state = ChestState::CLOSED;
+                }
+                break;
+            }
+            case ChestState::CLOSED:
+                break;
+            }
         }
+
 
         // Aqui executamos as operações de renderização
 
@@ -3244,38 +3311,44 @@ int main()
         {
             for (auto &name : g_SceneParts[idx].render_object_names)
             {
-                float door_y_offset = 0.0f;
-                if (g_Doors.size() > 0 && g_VirtualScene.find(name) != g_VirtualScene.end())
+                // Pular portas e baus neste path — eles são renderizados pelo Path 2 (g_SceneObjectInstances)
+                // com a matrix de instância correta (posição, rotação, escala).
                 {
                     std::string name_str(name);
-                    bool is_door_mesh = (name_str.find("DOOR") != std::string::npos ||
-                                         name_str.find("door") != std::string::npos);
-                    if (is_door_mesh)
+                    if (name_str.find("DOOR") != std::string::npos ||
+                        name_str.find("door") != std::string::npos ||
+                        name_str.find("CHEST") != std::string::npos ||
+                        name_str.find("chest") != std::string::npos)
+                        continue;
+                }
+
+                // Pular cobwebs quebradas
+                {
+                    std::string name_str(name);
+                    if (name_str.find("COBWEB_FLOORHOLE") != std::string::npos)
                     {
-                        for (const auto &door : g_Doors)
+                        bool cobweb_broken = false;
+                        glm::vec4 mesh_center = (model * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+                        for (const auto &cw : g_Cobwebs)
                         {
-                            if (door.current_y_offset > 0.01f)
+                            if (cw.broken)
                             {
-                                door_y_offset = door.current_y_offset;
-                                break;
+                                float dx = cw.bbox_center.x - mesh_center.x;
+                                float dz = cw.bbox_center.z - mesh_center.z;
+                                if (dx * dx + dz * dz < 1.0f)
+                                {
+                                    cobweb_broken = true;
+                                    break;
+                                }
                             }
+                        }
+                        if (cobweb_broken)
+                        {
+                            continue;
                         }
                     }
                 }
-                if (door_y_offset > 0.01f)
-                {
-                    glm::mat4 door_model = model * Matrix_Translate(0.0f, door_y_offset, 0.0f);
-                    glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(door_model));
-                    glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE,
-                                       glm::value_ptr(glm::transpose(glm::inverse(door_model))));
-                }
                 DrawVirtualObject(name.c_str());
-                if (door_y_offset > 0.01f)
-                {
-                    glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
-                    glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE,
-                                       glm::value_ptr(glm::transpose(glm::inverse(model))));
-                }
             }
         }
 
@@ -3301,15 +3374,44 @@ int main()
                 glm::mat4 S = Matrix_Scale(inst.scale.x, inst.scale.y, inst.scale.z);
                 glm::mat4 object_model = T * Ry * Rx * Rz * S;
 
-                // Para portas que estão abrindo, aplica offset Y
+                // Para portas que estão abrindo, aplica offset Y apenas para a porta correspondente
                 if (inst.type == "DOOR")
                 {
-                    for (const auto& door : g_Doors)
+                    float best_dist = 1e10f;
+                    int best_door = -1;
+                    for (size_t di = 0; di < g_Doors.size(); ++di)
                     {
-                        if (door.current_y_offset > 0.01f)
+                        float dx = g_Doors[di].bbox_center.x - inst.position.x;
+                        float dy = g_Doors[di].bbox_center.y - inst.position.y;
+                        float dz = g_Doors[di].bbox_center.z - inst.position.z;
+                        float dist = dx * dx + dy * dy + dz * dz;
+                        if (dist < best_dist)
                         {
-                            object_model = Matrix_Translate(0.0f, door.current_y_offset, 0.0f) * object_model;
-                            break;
+                            best_dist = dist;
+                            best_door = (int)di;
+                        }
+                    }
+                    if (best_door >= 0 && best_dist < 4.0f && g_Doors[best_door].current_y_offset > 0.01f)
+                    {
+                        object_model = Matrix_Translate(0.0f, g_Doors[best_door].current_y_offset, 0.0f) * object_model;
+                    }
+                }
+
+                // Para baus: encontrar instancia correspondente
+                int best_chest = -1;
+                float best_chest_dist = 1e10f;
+                if (inst.type == "CHEST")
+                {
+                    for (size_t ci = 0; ci < g_Chests.size(); ++ci)
+                    {
+                        float dx = g_Chests[ci].bbox_center.x - inst.position.x;
+                        float dy = g_Chests[ci].bbox_center.y - inst.position.y;
+                        float dz = g_Chests[ci].bbox_center.z - inst.position.z;
+                        float dist = dx * dx + dy * dy + dz * dz;
+                        if (dist < best_chest_dist)
+                        {
+                            best_chest_dist = dist;
+                            best_chest = (int)ci;
                         }
                     }
                 }
@@ -3325,15 +3427,73 @@ int main()
                 snprintf(obj_prefix, sizeof(obj_prefix), "scene%02d_json_%zu_", (int)idx, i);
                 for (size_t shape = 0; shape < obj_model->shapes.size(); ++shape)
                 {
-                    std::string shape_name = std::string(obj_prefix) + obj_model->shapes[shape].name;
-                    // Remove o prefixo duplicado se já estiver no nome
-                    std::string original_shape_name = obj_model->shapes[shape].name;
-                    if (shape_name.find(original_shape_name) == std::string::npos)
-                        shape_name = std::string(obj_prefix) + original_shape_name;
+                    // BuildTrianglesAndAddToVirtualScene adiciona sufixo _grpN por material
+                    std::string base_name = std::string(obj_prefix) + obj_model->shapes[shape].name;
 
-                    auto virt_it = g_VirtualScene.find(shape_name);
-                    if (virt_it != g_VirtualScene.end())
+                    // Para baus: aplicar rotacao da tampa no shape CHEST_LID
+                    glm::mat4 shape_model = object_model;
+                    if (inst.type == "CHEST" && best_chest >= 0 && best_chest_dist < 4.0f)
                     {
+                        std::string shape_name_upper = obj_model->shapes[shape].name;
+                        // Converter para uppercase para comparar
+                        std::string upper = shape_name_upper;
+                        for (auto &c : upper) c = toupper(c);
+                        if (upper.find("LID") != std::string::npos)
+                        {
+                             float angle_deg = g_Chests[best_chest].current_lid_angle;
+                            if (angle_deg > 0.01f)
+                            {
+                                float angle_rad = glm::radians(angle_deg);
+                                float hinge_px = (-0.700275f + 0.175356f) / 2.0f;
+                                float hinge_py = (0.080824f + 0.067520f) / 2.0f;
+                                float hinge_pz = (0.154315f + -0.688599f) / 2.0f;
+                                float ax = 0.175356f - (-0.700275f);
+                                float ay = 0.067520f - 0.080824f;
+                                float az = -0.688599f - 0.154315f;
+                                float alen = sqrtf(ax*ax + ay*ay + az*az);
+                                glm::vec4 hinge_axis(ax/alen, ay/alen, az/alen, 0.0f);
+                                shape_model = object_model *
+                                    Matrix_Translate(hinge_px, hinge_py, hinge_pz) *
+                                    Matrix_Rotate(angle_rad, hinge_axis) *
+                                    Matrix_Translate(-hinge_px, -hinge_py, -hinge_pz);
+                            }
+                        }
+                    }
+
+                    // Atualiza matrix para este shape
+                    glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(shape_model));
+                    glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE,
+                                       glm::value_ptr(glm::transpose(glm::inverse(shape_model))));
+                    for (size_t grp = 0; ; ++grp)
+                    {
+                        char grp_suffix[32];
+                        snprintf(grp_suffix, sizeof(grp_suffix), "_grp%zu", grp);
+                        std::string shape_name = base_name + grp_suffix;
+
+                        auto virt_it = g_VirtualScene.find(shape_name);
+                        if (virt_it == g_VirtualScene.end())
+                            break; // sem mais grupos
+
+                        // Pular cobwebs quebradas
+                        if (inst.type == "COBWEB_FLOORHOLE")
+                        {
+                            bool cobweb_broken = false;
+                            for (const auto &cw : g_Cobwebs)
+                            {
+                                if (cw.broken)
+                                {
+                                    float dx = cw.bbox_center.x - inst.position.x;
+                                    float dz = cw.bbox_center.z - inst.position.z;
+                                    if (dx * dx + dz * dz < 1.0f)
+                                    {
+                                        cobweb_broken = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (cobweb_broken)
+                                continue;
+                        }
                         DrawVirtualObject(shape_name.c_str());
                     }
                 }
@@ -4765,6 +4925,10 @@ void BuildCollisionDataFromObjModel(ObjModel *model, glm::mat4 model_matrix)
         {
             shape_collision.type = CollisionShapeType::DOOR;
         }
+        else if (model->shapes[shape].name.find("COBWEB_FLOORHOLE") != std::string::npos)
+        {
+            shape_collision.type = CollisionShapeType::COBWEB_FLOORHOLE;
+        }
         else if (model->shapes[shape].name.find("VINES") != std::string::npos)
         {
             shape_collision.type = CollisionShapeType::VINES;
@@ -4846,6 +5010,10 @@ void BuildCollisionDataIntoVector(ObjModel *model, glm::mat4 model_matrix,
         if (model->shapes[shape].name.find("DOOR") != std::string::npos)
         {
             shape_collision.type = CollisionShapeType::DOOR;
+        }
+        else if (model->shapes[shape].name.find("COBWEB_FLOORHOLE") != std::string::npos)
+        {
+            shape_collision.type = CollisionShapeType::COBWEB_FLOORHOLE;
         }
         else if (model->shapes[shape].name.find("VINES") != std::string::npos)
         {

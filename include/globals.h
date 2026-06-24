@@ -41,3 +41,10 @@ extern bool g_ShowPlayerCoords;
 // Sistema de portas
 extern std::vector<DoorInstance> g_Doors;
 extern bool g_EnterPressed;
+
+// Sistema de baus
+extern std::vector<ChestInstance> g_Chests;
+
+// Sistema de cobweb (buraco no chão)
+extern std::vector<CobwebInstance> g_Cobwebs;
+extern float g_CobwebFallSpeedThreshold;

@@ -40,6 +40,7 @@ enum class CollisionShapeType
     NONE,
     WATER,
     LADDER,
+    COBWEB_FLOORHOLE,
     VINES,
 };
 
@@ -69,6 +70,34 @@ struct DoorInstance
     glm::vec4 bbox_min = glm::vec4(0.0f);
     glm::vec4 bbox_max = glm::vec4(0.0f);
     std::vector<Triangle> original_triangles;
+};
+
+enum class ChestState
+{
+    CLOSED,
+    OPENING,
+    OPEN,
+    CLOSING,
+};
+
+struct ChestInstance
+{
+    ChestState state = ChestState::CLOSED;
+    float current_lid_angle = 0.0f;
+    float target_angle = 100.0f;
+    float open_timer = 0.0f;
+    float speed = 3.0f;
+    glm::vec4 bbox_center = glm::vec4(0.0f);
+    glm::vec4 bbox_min = glm::vec4(0.0f);
+    glm::vec4 bbox_max = glm::vec4(0.0f);
+};
+
+struct CobwebInstance
+{
+    bool broken = false;
+    glm::vec4 bbox_center = glm::vec4(0.0f);
+    glm::vec4 bbox_min = glm::vec4(0.0f);
+    glm::vec4 bbox_max = glm::vec4(0.0f);
 };
 
 // Broad Phase: AABB vs AABB
@@ -106,6 +135,8 @@ static bool OverlapOnAxis(
     const glm::vec4 &half_extents);
 
 int FindDoorIndexByBBox(const glm::vec4 &bbox_center, const std::vector<DoorInstance> &doors);
+
+int FindChestIndexByBBox(const glm::vec4 &bbox_center, const std::vector<ChestInstance> &chests);
 
 bool BBoxOverlap(const glm::vec4 &a_min, const glm::vec4 &a_max,
                  const glm::vec4 &b_min, const glm::vec4 &b_max);

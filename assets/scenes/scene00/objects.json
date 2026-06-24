@@ -3,14 +3,133 @@
     {
       "model": "door.obj",
       "type": "DOOR",
-      "position": [0, 0, 0],
-      "rotation": [0, 0, 0],
-      "scale": [1, 1, 1],
+      "position": [
+        2e-06,
+        18.86426,
+        12.206282
+      ],
+      "rotation": [
+        -0.21,
+        -54.81,
+        0.03
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
       "interactive": true,
       "collision_type": "DOOR",
       "aabb": {
-        "min": [9.32117, 8.8773, 9.32116],
-        "max": [10.564, 11.0966, 10.564]
+        "min": [
+          -0.665796,
+          17.754597,
+          11.984347
+        ],
+        "max": [
+          0.665801,
+          19.973923,
+          12.428217
+        ]
+      }
+    },
+    {
+      "model": "ladder.obj",
+      "type": "LADDER",
+      "position": [
+        4.769552,
+        2.349045,
+        5.424252
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "interactive": true,
+      "collision_type": "LADDER",
+      "aabb": {
+        "min": [
+          4.490582,
+          -1e-06,
+          5.16326
+        ],
+        "max": [
+          5.048521,
+          4.698092,
+          5.685245
+        ]
+      }
+    },
+    {
+      "model": "door.obj",
+      "type": "DOOR",
+      "position": [
+        9.942576,
+        9.986964,
+        9.942572
+      ],
+      "rotation": [
+        -0.18,
+        -9.8,
+        0.02
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "interactive": true,
+      "collision_type": "DOOR",
+      "aabb": {
+        "min": [
+          9.321165,
+          8.877302,
+          9.321159
+        ],
+        "max": [
+          10.563987,
+          11.096626,
+          10.563985
+        ]
+      }
+    },
+    {
+      "model": "COBWEB_FLOORHOLE.obj",
+      "type": "COBWEB_FLOORHOLE",
+      "position": [
+        0.0,
+        0.136252,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ],
+      "interactive": false,
+      "collision_type": "COBWEB_FLOORHOLE",
+      "aabb": {
+        "min": [
+          -3.134753,
+          -1e-06,
+          -3.134753
+        ],
+        "max": [
+          3.134753,
+          0.272505,
+          3.134753
+        ]
       }
     }
   ]

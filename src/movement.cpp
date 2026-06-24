@@ -15,6 +15,21 @@ const float jump_speed =  4.0f;
 const float step_height = 0.20f;
 const float step_subdiv = 0.04f;
 
+static bool IsCobwebBroken(const CollisionShape &shape)
+{
+    glm::vec4 center = (shape.bbox_min + shape.bbox_max) * 0.5f;
+    for (const auto &cw : g_Cobwebs)
+    {
+        if (!cw.broken)
+            continue;
+        float dx = cw.bbox_center.x - center.x;
+        float dz = cw.bbox_center.z - center.z;
+        if (dx * dx + dz * dz < 0.01f)
+            return true;
+    }
+    return false;
+}
+
 // Helper: testa OBB contra cenário, retorna true se LIVRE
 // Verifica TODAS as shapes — não para no primeiro hit.
 // Isso é necessário porque CollidesWithScenarioObb retorna apenas o primeiro tipo,
@@ -29,7 +44,11 @@ static bool IsPositionFree(const glm::vec4 &pos, const glm::vec4 &halfExt, float
         const CollisionShape &shape = g_ScenarioCollisionShapes[i];
         if (shape.type != CollisionShapeType::SOLID &&
             shape.type != CollisionShapeType::DOOR &&
-            shape.type != CollisionShapeType::WATER)
+            shape.type != CollisionShapeType::WATER &&
+            shape.type != CollisionShapeType::COBWEB_FLOORHOLE)
+            continue;
+
+        if (shape.type == CollisionShapeType::COBWEB_FLOORHOLE && IsCobwebBroken(shape))
             continue;
 
         CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
@@ -74,6 +93,8 @@ static bool IsPositionFreeWalkThrough(const glm::vec4 &pos, const glm::vec4 &hal
         if (shape.type == CollisionShapeType::NONE)
             continue;
         if (shape.type == CollisionShapeType::DOOR && IsDoorShapeOpen(shape))
+            continue;
+        if (shape.type == CollisionShapeType::COBWEB_FLOORHOLE && IsCobwebBroken(shape))
             continue;
 
         CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
@@ -304,6 +325,40 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     CollisionOBB detection_obb = {g_PlayerCubePosition, detection_extents, g_PlayerYaw};
     g_CollidedWithAVine = IsCollidingWithTypeObb(detection_obb, g_ScenarioCollisionShapes, CollisionShapeType::VINES);
     g_CollidedWithALadder = IsCollidingWithTypeObb(detection_obb, g_ScenarioCollisionShapes, CollisionShapeType::LADDER);
+
+    // Detectar quebra de cobweb por queda
+    if (!g_PlayerOnGround && g_PlayerVerticalVelocity < g_CobwebFallSpeedThreshold)
+    {
+        CollisionOBB cobweb_test = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
+        const CollisionAABB cobweb_aabb = ComputeObbAabb(cobweb_test);
+
+        for (size_t i = 0; i < g_ScenarioCollisionShapes.size(); ++i)
+        {
+            const CollisionShape &shape = g_ScenarioCollisionShapes[i];
+            if (shape.type != CollisionShapeType::COBWEB_FLOORHOLE)
+                continue;
+            if (IsCobwebBroken(shape))
+                continue;
+
+            CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
+            if (!AabbAabbIntersect(cobweb_aabb, shape_aabb))
+                continue;
+
+            glm::vec4 center = (shape.bbox_min + shape.bbox_max) * 0.5f;
+            for (auto &cw : g_Cobwebs)
+            {
+                float dx = cw.bbox_center.x - center.x;
+                float dz = cw.bbox_center.z - center.z;
+        if (dx * dx + dz * dz < 1.0f)
+                {
+                    cw.broken = true;
+                    printf("Cobweb quebrada em (%.1f, %.1f, %.1f)!\n",
+                           cw.bbox_center.x, cw.bbox_center.y, cw.bbox_center.z);
+                    break;
+                }
+            }
+        }
+    }
     
     CollisionOBB real_obb = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
     CollisionShapeType real_col = CollidesWithScenarioObb(real_obb, g_ScenarioCollisionShapes);
