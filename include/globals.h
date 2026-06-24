@@ -26,12 +26,15 @@ extern bool g_IsClimbingAVine;
 extern bool g_IsClimbingALadder;
 extern bool g_CollidedWithAVine;
 extern bool g_CollidedWithALadder;
+extern bool g_LockOnMovementActive;
+extern glm::vec4 g_LockOnMovementForward;
+extern glm::vec4 g_LockOnMovementRight;
 
 // Sistema de combate com espada
-extern bool  g_SwordAttackHitActive;
+extern bool g_SwordAttackHitActive;
 extern float g_SwordAttackHitCooldown;
 extern std::vector<bool> g_SwordHitEnemies;
-extern int   g_SwordDamage;
+extern int g_SwordDamage;
 extern CollisionOBB g_SwordHitbox;
 
 // Debug drawing

@@ -214,17 +214,45 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     }
     else
     {
-        const float turn_speed = 2.1f;
-        if (g_APressed) g_PlayerYaw -= turn_speed * delta_time;
-        if (g_DPressed) g_PlayerYaw += turn_speed * delta_time;
-
         const float move_speed = g_PlayerStateMachine.GetMovementSpeed();
-        const glm::vec4 player_back(std::sin(g_PlayerYaw), 0.0f, -std::cos(g_PlayerYaw), 0.0f);
-        const glm::vec4 player_forward = -player_back;
+        if (g_LockOnMovementActive)
+        {
+            float forward_input = 0.0f;
+            float strafe_input = 0.0f;
+            if (g_WPressed) forward_input += 1.0f;
+            if (g_SPressed) forward_input -= 1.0f;
+            if (g_DPressed) strafe_input -= 1.0f;
+            if (g_APressed) strafe_input += 1.0f;
 
-        if (g_WPressed) move_input += 1.0f;
-        if (g_SPressed) move_input -= 1.0f;
-        horizontal_move = player_forward * (move_input * move_speed * delta_time);
+            glm::vec4 move_direction =
+                g_LockOnMovementForward * forward_input +
+                g_LockOnMovementRight * strafe_input;
+            move_direction.y = 0.0f;
+            move_direction.w = 0.0f;
+
+            const float move_length = std::sqrt(move_direction.x * move_direction.x +
+                                                move_direction.z * move_direction.z);
+            if (move_length > 0.001f)
+            {
+                move_direction = move_direction / move_length;
+                horizontal_move = move_direction * (move_speed * delta_time);
+            }
+
+            move_input = forward_input;
+        }
+        else
+        {
+            const float turn_speed = 2.1f;
+            if (g_APressed) g_PlayerYaw -= turn_speed * delta_time;
+            if (g_DPressed) g_PlayerYaw += turn_speed * delta_time;
+
+            const glm::vec4 player_back(std::sin(g_PlayerYaw), 0.0f, -std::cos(g_PlayerYaw), 0.0f);
+            const glm::vec4 player_forward = -player_back;
+
+            if (g_WPressed) move_input += 1.0f;
+            if (g_SPressed) move_input -= 1.0f;
+            horizontal_move = player_forward * (move_input * move_speed * delta_time);
+        }
 
         g_PlayerVerticalVelocity += gravity * delta_time;
         if (g_SpacePressed && g_PlayerOnGround)

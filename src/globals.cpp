@@ -21,11 +21,14 @@ bool g_IsClimbingAVine = false;
 bool g_IsClimbingALadder = false;
 bool g_CollidedWithAVine = false;
 bool g_CollidedWithALadder = false;
+bool g_LockOnMovementActive = false;
+glm::vec4 g_LockOnMovementForward(0.0f, 0.0f, 1.0f, 0.0f);
+glm::vec4 g_LockOnMovementRight(1.0f, 0.0f, 0.0f, 0.0f);
 
-bool  g_SwordAttackHitActive = false;
+bool g_SwordAttackHitActive = false;
 float g_SwordAttackHitCooldown = 0.0f;
 std::vector<bool> g_SwordHitEnemies;
-int   g_SwordDamage = 1;
+int g_SwordDamage = 1;
 CollisionOBB g_SwordHitbox = {glm::vec4(0.0f), glm::vec4(0.0f), 0.0f};
 
 bool g_ShowDebugHitboxes = false;
