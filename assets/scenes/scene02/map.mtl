@@ -9,7 +9,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 1
-map_Kd /home/edulazuta/dungeon_assets/models/hyrule/dungeon_assets/chests/cmn_tr_tbox_7600.png
+map_Kd ../textures/cmn_tr_tbox_7600.png
 
 newmtl dg01_kabe_00_0.001
 Ns 250.000000
@@ -19,7 +19,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
-map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_kabe_00_0.png
+map_Kd ../textures/dg01_kabe_00_0.png
 
 newmtl dg01_ki_03_A800.001
 Ns 250.000000
@@ -29,7 +29,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
-map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_ki_03_a800.png
+map_Kd ../textures/dg01_ki_03_a800.png
 
 newmtl dg01_kiri_03_D200.001
 Ns 250.000000
@@ -39,7 +39,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
-map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_kiri_03_d200.png
+map_Kd ../textures/dg01_kiri_03_d200.png
 
 newmtl dg01_kumo_02_17A00.001
 Ns 250.000000
@@ -49,7 +49,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
-map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_kumo_02_17a00.png
+map_Kd ../textures/dg01_kumo_02_17a00.png
 
 newmtl dg01_syok_01_2CA00.001
 Ns 250.000000
@@ -59,7 +59,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
-map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_syok_01_2ca00.png
+map_Kd ../textures/dg01_syok_01_2ca00.png
 
 newmtl dg01_tuta_01_31E00
 Ns 250.000000
@@ -69,7 +69,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
-map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_tuta_01_31e00.png
+map_Kd ../textures/dg01_tuta_01_31e00.png
 
 newmtl dg01_yuka_00_46E00
 Ns 250.000000
@@ -79,7 +79,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
-map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/assets/scenes/textures/dg01_yuka_00_46e00.png
+map_Kd ../textures/dg01_yuka_00_46e00.png
 
 newmtl ydan_t_hasigo_m_0
 Ns 1000.000000
@@ -89,4 +89,4 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 1
-map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/hyrule/inside_the_deku_tree/props/ydan_t_hasigo_m_0.png
+map_Kd ../textures/ydan_t_hasigo_m_0.png
