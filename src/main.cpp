@@ -964,6 +964,101 @@ static bool ExtractJSONBool(const std::string& json, const std::string& key, std
     return value.substr(0, 4) == "true";
 }
 
+static void LoadGhostLadderConfig()
+{
+    char buf[256], buf_bin[256];
+    snprintf(buf, sizeof(buf), "assets/scenes/ghost_ladders.json");
+    snprintf(buf_bin, sizeof(buf_bin), "../../assets/scenes/ghost_ladders.json");
+    const std::string config_path = ResolveScene00Path(buf_bin, buf);
+
+    std::ifstream file(config_path);
+    if (!file.is_open())
+    {
+        printf("[GHOST LADDER CONFIG] No config file found at %s\n", config_path.c_str());
+        return;
+    }
+
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    std::string json_text = buffer.str();
+    file.close();
+
+    std::size_t array_start = json_text.find("\"ghost_ladders\"");
+    if (array_start == std::string::npos)
+    {
+        printf("[GHOST LADDER CONFIG] No 'ghost_ladders' key found\n");
+        return;
+    }
+    array_start = json_text.find('[', array_start);
+    if (array_start == std::string::npos)
+    {
+        printf("[GHOST LADDER CONFIG] No array found for 'ghost_ladders'\n");
+        return;
+    }
+    std::size_t array_end = FindMatchingJSONDelimiter(json_text, array_start, '[', ']');
+    if (array_end == std::string::npos) return;
+
+    std::string entries_block = json_text.substr(array_start + 1, array_end - array_start - 1);
+
+    const float position_tolerance = 0.5f;
+    std::size_t entry_pos = 0;
+    int match_count = 0;
+    while (true)
+    {
+        std::size_t brace_start = entries_block.find('{', entry_pos);
+        if (brace_start == std::string::npos) break;
+        std::size_t brace_end = FindMatchingJSONDelimiter(entries_block, brace_start, '{', '}');
+        if (brace_end == std::string::npos) break;
+
+        std::string entry = entries_block.substr(brace_start, brace_end - brace_start + 1);
+
+        int entry_scene = (int)ExtractJSONFloat(entry, "scene");
+        glm::vec3 entry_pos_vec = ExtractJSONVec3(entry, "position");
+        float entry_final_y = ExtractJSONFloat(entry, "final_y_offset");
+
+        bool matched = false;
+        for (auto &gl : g_GhostLadders)
+        {
+            if (gl.scene_part_index != entry_scene) continue;
+
+            float dx = gl.bbox_center.x - entry_pos_vec.x;
+            float dy = gl.bbox_center.y - entry_pos_vec.y;
+            float dz = gl.bbox_center.z - entry_pos_vec.z;
+            float dist = dx * dx + dy * dy + dz * dz;
+
+            if (dist < position_tolerance * position_tolerance)
+            {
+                gl.final_y_offset = entry_final_y;
+                matched = true;
+                match_count++;
+                printf("[GHOST LADDER CONFIG] scene%02d center=(%.1f,%.1f,%.1f) -> final_y_offset=%.2f\n",
+                       entry_scene, entry_pos_vec.x, entry_pos_vec.y, entry_pos_vec.z, entry_final_y);
+                break;
+            }
+        }
+        if (!matched)
+        {
+            printf("[GHOST LADDER CONFIG] WARNING: No ghost ladder matched for scene%02d position=(%.1f,%.1f,%.1f)\n",
+                   entry_scene, entry_pos_vec.x, entry_pos_vec.y, entry_pos_vec.z);
+        }
+
+        entry_pos = brace_end + 1;
+    }
+
+    for (size_t i = 0; i < g_GhostLadders.size(); ++i)
+    {
+        auto &gl = g_GhostLadders[i];
+        if (gl.final_y_offset == 0.0f)
+        {
+            printf("[GHOST LADDER CONFIG] Ghost ladder %zu (scene%02d center=(%.1f,%.1f,%.1f)) has no final_y_offset in config. Starting GROUNDED at original position.\n",
+                   i, gl.scene_part_index, gl.bbox_center.x, gl.bbox_center.y, gl.bbox_center.z);
+            gl.state = GhostLadderState::GROUNDED;
+        }
+    }
+    printf("[GHOST LADDER CONFIG] Loaded: %d matches for %zu ghost ladders\n",
+           match_count, g_GhostLadders.size());
+}
+
 // Carrega instâncias de objetos de objects.json para uma cena
 std::vector<SceneObjectInstance> LoadSceneObjectInstances(int scene_idx)
 {
@@ -1746,65 +1841,11 @@ static void UpdateGhostLadders(float delta_time)
 
         gl.current_y_offset += fall_speed * delta_time;
 
-        glm::vec4 full_half = (gl.bbox_max - gl.bbox_min) * 0.5f;
-        full_half.w = 0.0f;
-        glm::vec4 full_center = gl.bbox_center + glm::vec4(0.0f, gl.current_y_offset, 0.0f, 0.0f);
-
-        CollisionOBB test_obb = {full_center, full_half, 0.0f};
-
-        // Encontra a altura maxima do triangulo de GROUND que colide com a ghost ladder
-        float best_ground_y = -1e10f;
-        for (const auto &shape : g_ScenarioCollisionShapes)
+        if (gl.current_y_offset <= gl.final_y_offset)
         {
-            if (shape.type != CollisionShapeType::GROUND)
-                continue;
-
-            CollisionAABB obb_aabb = ComputeObbAabb(test_obb);
-            CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
-            if (!AabbAabbIntersect(obb_aabb, shape_aabb))
-                continue;
-
-            for (const auto &tri : shape.triangles)
-            {
-                if (!TriangleIntersectsObb(tri, test_obb))
-                    continue;
-
-                // So aceita triangulo cuja media dos vertices esta abaixo do centro
-                float tri_mid_y = (tri.v1.y + tri.v2.y + tri.v3.y) / 3.0f;
-                if (tri_mid_y >= full_center.y)
-                    continue;
-
-                if (tri_mid_y > best_ground_y)
-                    best_ground_y = tri_mid_y;
-            }
-        }
-
-        static int dbgCounter = 0;
-        if (++dbgCounter % 60 == 0)
-        {
-            int groundCount = 0, solidCount = 0;
-            for (const auto &shape : g_ScenarioCollisionShapes)
-            {
-                if (shape.type == CollisionShapeType::GROUND) groundCount++;
-                if (shape.type == CollisionShapeType::SOLID) solidCount++;
-            }
-            printf("[GHOST LADDER] off=%.2f center=(%.1f,%.1f,%.1f) half=(%.1f,%.1f,%.1f) bestGroundY=%.1f ground=%d solid=%d\n",
-                   gl.current_y_offset, full_center.x, full_center.y, full_center.z,
-                   full_half.x, full_half.y, full_half.z, best_ground_y, groundCount, solidCount);
-        }
-
-        if (best_ground_y > -1e9f)
-        {
-            // A base da ghost ladder deve ficar logo acima do chao
-            // bottom_y = full_center.y - full_half.y  deve ser >= best_ground_y
-            // full_center.y = gl.bbox_center.y + y_offset
-            // gl.bbox_center.y + target_offset - full_half.y = best_ground_y + 0.01f
-            float target_offset = best_ground_y + 0.01f + full_half.y - gl.bbox_center.y;
-            gl.current_y_offset = target_offset;
+            gl.current_y_offset = gl.final_y_offset;
             gl.state = GhostLadderState::GROUNDED;
-            printf("[GHOST LADDER] Grounded: y_offset=%.2f bottom=%.2f\n",
-                   gl.current_y_offset,
-                   gl.bbox_center.y + gl.current_y_offset - full_half.y);
+            printf("[GHOST LADDER] Grounded at final position: y_offset=%.2f\n", gl.final_y_offset);
         }
     }
 }
@@ -2769,57 +2810,6 @@ int main()
                 part.collision_shapes, part.bbox_min, part.bbox_max);
         }
 
-        // --- Extrai colisao GHOST_LADDER do map.obj ---
-        for (size_t shape = 0; shape < map_model.shapes.size(); ++shape)
-        {
-            const std::string &sname = map_model.shapes[shape].name;
-            if (sname.find("GHOST_LADDER") == std::string::npos)
-                continue;
-
-            CollisionShape shape_collision;
-            shape_collision.type = CollisionShapeType::GHOST_LADDER;
-            shape_collision.bbox_min = glm::vec4(+std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), 1.0f);
-            shape_collision.bbox_max = glm::vec4(-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), 1.0f);
-
-            const size_t num_triangles = map_model.shapes[shape].mesh.num_face_vertices.size();
-            shape_collision.triangles.reserve(num_triangles);
-
-            glm::mat4 model_matrix = Matrix_Identity();
-
-            for (size_t triangle = 0; triangle < num_triangles; ++triangle)
-            {
-                assert(map_model.shapes[shape].mesh.num_face_vertices[triangle] == 3);
-
-                Triangle world_triangle;
-                for (size_t vertex = 0; vertex < 3; ++vertex)
-                {
-                    const tinyobj::index_t idx = map_model.shapes[shape].mesh.indices[3 * triangle + vertex];
-                    const glm::vec4 p_model(
-                        map_model.attrib.vertices[3 * idx.vertex_index + 0],
-                        map_model.attrib.vertices[3 * idx.vertex_index + 1],
-                        map_model.attrib.vertices[3 * idx.vertex_index + 2],
-                        1.0f);
-                    const glm::vec4 p_world = model_matrix * p_model;
-                    const glm::vec4 p = glm::vec4(p_world.x, p_world.y, p_world.z, 1.0f);
-
-                    if (vertex == 0) world_triangle.v1 = p;
-                    if (vertex == 1) world_triangle.v2 = p;
-                    if (vertex == 2) world_triangle.v3 = p;
-
-                    shape_collision.bbox_min.x = std::min(shape_collision.bbox_min.x, p.x);
-                    shape_collision.bbox_min.y = std::min(shape_collision.bbox_min.y, p.y);
-                    shape_collision.bbox_min.z = std::min(shape_collision.bbox_min.z, p.z);
-                    shape_collision.bbox_max.x = std::max(shape_collision.bbox_max.x, p.x);
-                    shape_collision.bbox_max.y = std::max(shape_collision.bbox_max.y, p.y);
-                    shape_collision.bbox_max.z = std::max(shape_collision.bbox_max.z, p.z);
-                }
-                shape_collision.triangles.push_back(world_triangle);
-            }
-
-            part.collision_shapes.push_back(shape_collision);
-            printf("  GHOST_LADDER collision extraida do map.obj: %zu triangulos\n", shape_collision.triangles.size());
-        }
-
         printf("  Collision AABB: [%.1f,%.1f,%.1f] a [%.1f,%.1f,%.1f]\n",
                part.bbox_min.x, part.bbox_min.y, part.bbox_min.z,
                part.bbox_max.x, part.bbox_max.y, part.bbox_max.z);
@@ -2890,6 +2880,7 @@ int main()
         for (size_t i = 0; i < instances.size(); ++i)
         {
             const auto& inst = instances[i];
+            if (inst.type == "GHOST_LADDER") continue;
             ObjModel* obj_model = LoadOrGetCachedObjModel(inst.model_path);
             if (!obj_model) continue;
 
@@ -3007,18 +2998,24 @@ int main()
                 GhostLadderInstance gl;
                 gl.state = GhostLadderState::FLOATING;
                 gl.current_y_offset = 0.0f;
+                gl.final_y_offset = 0.0f;
                 gl.bbox_center = (cs.bbox_min + cs.bbox_max) * 0.5f;
                 gl.bbox_min = cs.bbox_min;
                 gl.bbox_max = cs.bbox_max;
                 gl.original_triangles = cs.triangles;
                 gl.scene_part_index = (int)part_idx;
                 g_GhostLadders.push_back(gl);
-                printf("  Ghost ladder encontrada: center=(%.1f,%.1f,%.1f)\n",
-                       gl.bbox_center.x, gl.bbox_center.y, gl.bbox_center.z);
+                printf("  Ghost ladder encontrada: center=(%.1f,%.1f,%.1f) triangles=%zu bbox=[(%.1f,%.1f,%.1f)-(%.1f,%.1f,%.1f)]\n",
+                       gl.bbox_center.x, gl.bbox_center.y, gl.bbox_center.z,
+                       gl.original_triangles.size(),
+                       gl.bbox_min.x, gl.bbox_min.y, gl.bbox_min.z,
+                       gl.bbox_max.x, gl.bbox_max.y, gl.bbox_max.z);
             }
         }
     }
     printf("Total de ghost ladders: %zu\n", g_GhostLadders.size());
+
+    LoadGhostLadderConfig();
 
     // Computa adjacencia entre as cenas (AABB overlap com margem)
     printf("\n=== Computando adjacencia entre cenas ===\n");
@@ -3599,7 +3596,8 @@ int main()
                     for (size_t idx : g_CurrentActiveSceneIndices)
                     {
                         for (auto &cs : g_SceneParts[idx].collision_shapes)
-                            g_ScenarioCollisionShapes.push_back(cs);
+                            if (cs.type != CollisionShapeType::GHOST_LADDER)
+                                g_ScenarioCollisionShapes.push_back(cs);
                     }
                 }
             }

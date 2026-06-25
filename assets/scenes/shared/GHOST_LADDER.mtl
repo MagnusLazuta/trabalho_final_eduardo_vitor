@@ -1,0 +1,12 @@
+# Blender 5.1.1 MTL File: 'scene00.blend'
+# www.blender.org
+
+newmtl ydan_t_hasigo_m_0.001
+Ns 1000.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.000000 0.000000 0.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 1
+map_Kd /home/edulazuta/trabalho_final_eduardo_vitor/hyrule/inside_the_deku_tree/props/ydan_t_hasigo_m_0.png

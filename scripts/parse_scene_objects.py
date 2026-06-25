@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Parse map.obj to find named objects (DOOR, TORCH, CHEST, LADDER, WATER, etc.)
+Parse map.obj to find named objects (DOOR, TORCH, CHEST, GHOST_LADDER, LADDER, WATER, etc.)
 and generate/update objects.json.
 
 Usage:
@@ -21,25 +21,28 @@ PROJECT_ROOT = Path(__file__).parent.parent
 SCENES_DIR = PROJECT_ROOT / "assets" / "scenes"
 SHARED_DIR = SCENES_DIR / "shared"
 
-# Object types to find (uppercase, no VINES)
-FIND_TYPES = {"DOOR", "TORCH", "CHEST", "LADDER", "WATER", "COBWEB_FLOORHOLE"}
+# Object types to find (uppercase, no VINES).
+# GHOST_LADDER must come before LADDER to avoid substring mismatch.
+FIND_TYPES = ["GHOST_LADDER", "DOOR", "TORCH", "CHEST", "LADDER", "WATER", "COBWEB_FLOORHOLE"]
 
 # Mapping from OBJ name to collision_type
 COLLISION_MAP = {
     "DOOR": "DOOR",
     "TORCH": "NONE",
     "CHEST": "SOLID",
+    "GHOST_LADDER": "GHOST_LADDER",
     "LADDER": "LADDER",
     "WATER": "WATER",
     "COBWEB_FLOORHOLE": "COBWEB_FLOORHOLE",
 }
 
 # Which types are interactive
-INTERACTIVE_TYPES = {"DOOR", "CHEST", "LADDER"}
+INTERACTIVE_TYPES = {"DOOR", "CHEST", "GHOST_LADDER", "LADDER"}
 
 # Mapping from type to shared model file
 MODEL_MAP = {
     "DOOR": "door.obj",
+    "GHOST_LADDER": "GHOST_LADDER.obj",
     "LADDER": "ladder.obj",
     "COBWEB_FLOORHOLE": "COBWEB_FLOORHOLE.obj",
     "CHEST": "chest.obj",

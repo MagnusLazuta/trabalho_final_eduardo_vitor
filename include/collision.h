@@ -113,6 +113,7 @@ struct GhostLadderInstance
 {
     GhostLadderState state = GhostLadderState::FLOATING;
     float current_y_offset = 0.0f;
+    float final_y_offset = 0.0f;
     glm::vec4 bbox_center = glm::vec4(0.0f);
     glm::vec4 bbox_min = glm::vec4(0.0f);
     glm::vec4 bbox_max = glm::vec4(0.0f);

@@ -1,0 +1,9 @@
+{
+  "ghost_ladders": [
+    {
+      "scene": 2,
+      "position": [23.59, 13.19, 23.65],
+      "final_y_offset": -6.0
+    }
+  ]
+}
