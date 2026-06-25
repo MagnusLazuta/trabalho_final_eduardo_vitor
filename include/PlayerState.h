@@ -7,6 +7,7 @@ enum class PlayerState {
     RUNNING,
     CLIMBING_VINE,
     CLIMBING_LADDER,
+    CLIMBING_GHOST_LADDER,
     ATTACKING,
     DEFENDING,
     JUMPING
@@ -18,7 +19,7 @@ public:
 
     void Update(bool wPressed, bool sPressed, bool shiftPressed,
                 bool attackPressed, bool defendPressed, bool jumpPressed,
-                bool isClimbingVine, bool isClimbingLadder,
+                bool isClimbingVine, bool isClimbingLadder, bool isClimbingGhostLadder,
                 bool onGround, float deltaTime);
 
     PlayerState GetCurrentState() const { return m_currentState; }

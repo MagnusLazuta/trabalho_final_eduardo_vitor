@@ -10,6 +10,35 @@
 
 bool QueryBlockingEnemyCollision(const glm::vec4 &center, const glm::vec4 &half_extents);
 
+static bool IsCollidingWithGhostLadder(const CollisionOBB &obb)
+{
+    for (const auto &gl : g_GhostLadders)
+    {
+        if (gl.state != GhostLadderState::GROUNDED)
+            continue;
+
+        CollisionAABB obb_aabb = ComputeObbAabb(obb);
+        glm::vec4 adj_min = gl.bbox_min + glm::vec4(0.0f, gl.current_y_offset, 0.0f, 0.0f);
+        glm::vec4 adj_max = gl.bbox_max + glm::vec4(0.0f, gl.current_y_offset, 0.0f, 0.0f);
+
+        if (obb_aabb.max.x < adj_min.x || obb_aabb.min.x > adj_max.x ||
+            obb_aabb.max.y < adj_min.y || obb_aabb.min.y > adj_max.y ||
+            obb_aabb.max.z < adj_min.z || obb_aabb.min.z > adj_max.z)
+            continue;
+
+        for (const auto &tri : gl.original_triangles)
+        {
+            Triangle offset_tri = tri;
+            offset_tri.v1.y += gl.current_y_offset;
+            offset_tri.v2.y += gl.current_y_offset;
+            offset_tri.v3.y += gl.current_y_offset;
+            if (TriangleIntersectsObb(offset_tri, obb))
+                return true;
+        }
+    }
+    return false;
+}
+
 const float gravity = -9.8f;
 const float jump_speed = 4.0f;
 const float step_height = 0.20f;
@@ -43,6 +72,7 @@ static bool IsPositionFree(const glm::vec4 &pos, const glm::vec4 &halfExt, float
     {
         const CollisionShape &shape = g_ScenarioCollisionShapes[i];
         if (shape.type != CollisionShapeType::SOLID &&
+            shape.type != CollisionShapeType::GROUND &&
             shape.type != CollisionShapeType::DOOR &&
             shape.type != CollisionShapeType::WATER &&
             shape.type != CollisionShapeType::COBWEB_FLOORHOLE)
@@ -175,25 +205,14 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     float vertical_move_amount = 0.0f;
     float move_input = 0.0f;
 
-    if (g_IsClimbingALadder || g_IsClimbingAVine)
+    if (g_IsClimbingALadder || g_IsClimbingAVine || g_IsClimbingAGhostLadder)
     {
         g_PlayerVerticalVelocity = 0.0f;
-        float climb_speed = g_IsClimbingALadder ? 2.0f : 1.5f;
+        float climb_speed = (g_IsClimbingALadder || g_IsClimbingAGhostLadder) ? 2.0f : 1.5f;
         if (g_WPressed)
             vertical_move_amount += climb_speed * delta_time;
         if (g_SPressed)
             vertical_move_amount -= climb_speed * delta_time;
-
-        static int climbDebugCounter = 0;
-        climbDebugCounter++;
-        if (climbDebugCounter % 60 == 0)
-        {
-            printf("[CLIMB MOVE] type=%s vertical=%.3f pos=(%.1f,%.1f,%.1f) W=%d S=%d\n",
-                   g_IsClimbingALadder ? "LADDER" : "VINE",
-                   vertical_move_amount,
-                   g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
-                   g_WPressed, g_SPressed);
-        }
 
         if (g_IsClimbingAVine)
         {
@@ -296,7 +315,7 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     test_pos_y.y += vertical_move_amount;
 
     bool yFree;
-    if (g_IsClimbingALadder || g_IsClimbingAVine)
+    if (g_IsClimbingALadder || g_IsClimbingAVine || g_IsClimbingAGhostLadder)
     {
         glm::vec4 climb_extents(0.1f, 0.1f, 0.1f, 0.0f);
         yFree = IsPositionFreeForClimbing(test_pos_y, climb_extents, g_PlayerYaw);
@@ -308,33 +327,6 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     {
         CollisionOBB test_obb = {test_pos_y, g_PlayerCubeHalfExtents, g_PlayerYaw};
         CollisionShapeType block_col = CollidesWithScenarioObb(test_obb, g_ScenarioCollisionShapes);
-
-        // Debug: log quando o jogador colide com algo caindo
-        if (g_PlayerVerticalVelocity < -0.1f)
-        {
-            printf("[COBWEB DEBUG] yFree=false velY=%.2f block_col=%d pos_y=%.2f test_y=%.2f\n",
-                   g_PlayerVerticalVelocity, (int)block_col,
-                   updated_position.y, test_pos_y.y);
-        }
-
-        if (block_col == CollisionShapeType::DOOR)
-        {
-            CollisionAABB obb_aabb = ComputeObbAabb(test_obb);
-            for (size_t i = 0; i < g_ScenarioCollisionShapes.size(); ++i)
-            {
-                const auto &cs = g_ScenarioCollisionShapes[i];
-                if (cs.type != CollisionShapeType::DOOR)
-                    continue;
-                CollisionAABB shape_aabb = {cs.bbox_min, cs.bbox_max};
-                if (!AabbAabbIntersect(obb_aabb, shape_aabb))
-                    continue;
-                printf("[DOOR DEBUG]   DOOR shape[%zu] bbox=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f) tri_count=%zu\n",
-                       i,
-                       cs.bbox_min.x, cs.bbox_min.y, cs.bbox_min.z,
-                       cs.bbox_max.x, cs.bbox_max.y, cs.bbox_max.z,
-                       cs.triangles.size());
-            }
-        }
 
         // Quebrar cobweb quando o player cai/pisa sobre ela
         if (g_PlayerVerticalVelocity < 5.0f)
@@ -375,20 +367,20 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     if (yFree)
     {
         updated_position.y = test_pos_y.y;
-        if (!g_IsClimbingALadder && !g_IsClimbingAVine)
+        if (!g_IsClimbingALadder && !g_IsClimbingAVine && !g_IsClimbingAGhostLadder)
             g_PlayerOnGround = false;
     }
     else
     {
         g_PlayerVerticalVelocity = 0.0f;
-        if (!g_IsClimbingALadder && !g_IsClimbingAVine)
+        if (!g_IsClimbingALadder && !g_IsClimbingAVine && !g_IsClimbingAGhostLadder)
             g_PlayerOnGround = true;
     }
 
     // Ground snap: se não está no chão e não está pulando/escalando,
     // tenta puxar o player para baixo até encontrar o chão.
     // Isso corrige flutuação causada por step climbing e evita cair através do chão.
-    if (!g_IsClimbingALadder && !g_IsClimbingAVine && !g_PlayerOnGround && g_PlayerVerticalVelocity <= 0.0f)
+    if (!g_IsClimbingALadder && !g_IsClimbingAVine && !g_IsClimbingAGhostLadder && !g_PlayerOnGround && g_PlayerVerticalVelocity <= 0.0f)
     {
         const float max_snap = 0.5f;
         const float snap_step = 0.02f;
@@ -412,6 +404,7 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
     CollisionOBB detection_obb = {g_PlayerCubePosition, detection_extents, g_PlayerYaw};
     g_CollidedWithAVine = IsCollidingWithTypeObb(detection_obb, g_ScenarioCollisionShapes, CollisionShapeType::VINES);
     g_CollidedWithALadder = IsCollidingWithTypeObb(detection_obb, g_ScenarioCollisionShapes, CollisionShapeType::LADDER);
+    g_CollidedWithAGhostLadder = IsCollidingWithGhostLadder(detection_obb);
 
     // Detectar quebra de cobweb por queda
     if (!g_PlayerOnGround && g_PlayerVerticalVelocity < g_CobwebFallSpeedThreshold)
@@ -449,25 +442,13 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
 
     CollisionOBB real_obb = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
     CollisionShapeType real_col = CollidesWithScenarioObb(real_obb, g_ScenarioCollisionShapes);
-    g_PlayerCubeColliding = (real_col == CollisionShapeType::SOLID || real_col == CollisionShapeType::DOOR || real_col == CollisionShapeType::WATER);
-
-    if (g_IsClimbingAVine || g_IsClimbingALadder)
-    {
-        static int colDebugCounter = 0;
-        colDebugCounter++;
-        if (colDebugCounter % 60 == 0)
-        {
-            printf("[CLIMB COL] vine=%d ladder=%d real=%d pos=(%.1f,%.1f,%.1f) yaw=%.1f\n",
-                   g_CollidedWithAVine, g_CollidedWithALadder, (int)real_col,
-                   g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
-                   g_PlayerYaw);
-        }
-    }
+    g_PlayerCubeColliding = (real_col == CollisionShapeType::SOLID || real_col == CollisionShapeType::GROUND || real_col == CollisionShapeType::DOOR || real_col == CollisionShapeType::WATER);
 
     // Auto-stop: quando não colide mais com vine/ladder, para após grace period
     // independente do input (evita voar segurando W)
     static float vineGraceTimer = 0.0f;
     static float ladderGraceTimer = 0.0f;
+    static float ghostLadderGraceTimer = 0.0f;
     const float grace_period = 0.3f;
 
     if (g_IsClimbingAVine)
@@ -481,7 +462,7 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
                 vineGraceTimer = 0.0f;
                 CollisionOBB ground_test = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
                 CollisionShapeType ground_col = CollidesWithScenarioObb(ground_test, g_ScenarioCollisionShapes);
-                g_PlayerOnGround = (ground_col == CollisionShapeType::SOLID);
+                g_PlayerOnGround = (ground_col == CollisionShapeType::SOLID || ground_col == CollisionShapeType::GROUND);;
                 g_PlayerVerticalVelocity = 0.0f;
                 g_SpacePressed = false;
                 g_AttackPressed = false;
@@ -503,7 +484,7 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
                 ladderGraceTimer = 0.0f;
                 CollisionOBB ground_test = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
                 CollisionShapeType ground_col = CollidesWithScenarioObb(ground_test, g_ScenarioCollisionShapes);
-                g_PlayerOnGround = (ground_col == CollisionShapeType::SOLID);
+                g_PlayerOnGround = (ground_col == CollisionShapeType::SOLID || ground_col == CollisionShapeType::GROUND);;
                 g_PlayerVerticalVelocity = 0.0f;
                 g_SpacePressed = false;
                 g_AttackPressed = false;
@@ -512,6 +493,28 @@ float UpdatePlayerMovement(GLFWwindow *window, float delta_time)
         else
         {
             ladderGraceTimer = 0.0f;
+        }
+    }
+    if (g_IsClimbingAGhostLadder)
+    {
+        if (!g_CollidedWithAGhostLadder)
+        {
+            ghostLadderGraceTimer += delta_time;
+            if (ghostLadderGraceTimer > grace_period)
+            {
+                g_IsClimbingAGhostLadder = false;
+                ghostLadderGraceTimer = 0.0f;
+                CollisionOBB ground_test = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
+                CollisionShapeType ground_col = CollidesWithScenarioObb(ground_test, g_ScenarioCollisionShapes);
+                g_PlayerOnGround = (ground_col == CollisionShapeType::SOLID || ground_col == CollisionShapeType::GROUND);;
+                g_PlayerVerticalVelocity = 0.0f;
+                g_SpacePressed = false;
+                g_AttackPressed = false;
+            }
+        }
+        else
+        {
+            ghostLadderGraceTimer = 0.0f;
         }
     }
 
@@ -586,13 +589,69 @@ void SnapPlayerToNearestVine()
         }
     }
 
+    // Snap to grounded ghost ladders
+    for (const auto &gl : g_GhostLadders)
+    {
+        if (gl.state != GhostLadderState::GROUNDED)
+            continue;
+
+        glm::vec4 adj_min = gl.bbox_min + glm::vec4(0.0f, gl.current_y_offset, 0.0f, 0.0f);
+        glm::vec4 adj_max = gl.bbox_max + glm::vec4(0.0f, gl.current_y_offset, 0.0f, 0.0f);
+        CollisionAABB gl_aabb = {adj_min, adj_max};
+        const CollisionAABB obb_aabb = ComputeObbAabb(detection_obb);
+        if (!AabbAabbIntersect(obb_aabb, gl_aabb))
+            continue;
+
+        for (const auto &tri : gl.original_triangles)
+        {
+            Triangle offset_tri = tri;
+            offset_tri.v1.y += gl.current_y_offset;
+            offset_tri.v2.y += gl.current_y_offset;
+            offset_tri.v3.y += gl.current_y_offset;
+            if (!TriangleIntersectsObb(offset_tri, detection_obb))
+                continue;
+
+            glm::vec4 e1 = offset_tri.v2 - offset_tri.v1;
+            glm::vec4 e2 = offset_tri.v3 - offset_tri.v1;
+            glm::vec4 n = crossproduct(e1, e2);
+            float nlen = std::sqrt(dotproduct(n, n));
+            if (nlen < 1e-6f)
+                continue;
+            n = n / nlen;
+            n.w = 0.0f;
+
+            glm::vec4 to_player = g_PlayerCubePosition - offset_tri.v1;
+            to_player.y = 0.0f;
+            float d1 = dotproduct(e1, to_player);
+            float d2 = dotproduct(e2, to_player);
+            float dot00 = dotproduct(e1, e1);
+            float dot11 = dotproduct(e2, e2);
+            float dot01 = dotproduct(e1, e2);
+            float denom = dot00 * dot11 - dot01 * dot01;
+            if (std::abs(denom) < 1e-6f)
+                continue;
+            float u = (d1 * dot11 - d2 * dot01) / denom;
+            float v = (d2 * dot00 - d1 * dot01) / denom;
+            u = std::max(0.0f, std::min(1.0f, u));
+            v = std::max(0.0f, std::min(1.0f - u, v));
+            glm::vec4 closest = offset_tri.v1 + u * e1 + v * e2;
+
+            float dx = closest.x - g_PlayerCubePosition.x;
+            float dz = closest.z - g_PlayerCubePosition.z;
+            float dist = dx * dx + dz * dz;
+            if (dist < best_dist)
+            {
+                best_dist = dist;
+                best_point = closest;
+                best_normal = n;
+            }
+        }
+    }
+
     if (best_dist < 1e29f)
     {
         // Snap XZ to closest point, offset slightly outward along normal
         g_PlayerCubePosition.x = best_point.x + best_normal.x * 0.1f;
         g_PlayerCubePosition.z = best_point.z + best_normal.z * 0.1f;
-        printf("[SNAP VINE] Snapped to vine surface at (%.1f, %.1f, %.1f) normal=(%.1f,%.1f,%.1f)\n",
-               g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
-               best_normal.x, best_normal.y, best_normal.z);
     }
 }

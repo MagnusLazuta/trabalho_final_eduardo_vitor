@@ -43,3 +43,7 @@ std::vector<ChestInstance> g_Chests;
 
 std::vector<CobwebInstance> g_Cobwebs;
 float g_CobwebFallSpeedThreshold = -5.0f;
+
+std::vector<GhostLadderInstance> g_GhostLadders;
+bool g_CollidedWithAGhostLadder = false;
+bool g_IsClimbingAGhostLadder = false;

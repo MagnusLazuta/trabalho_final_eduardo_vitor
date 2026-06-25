@@ -499,6 +499,7 @@ static void MoveEnemyWithScenarioCollision(
     test_position_x.x += movement.x;
     CollisionShapeType collision_x = CollidesWithScenario(test_position_x, scenario_collision_shapes, test_half_extents);
     if (collision_x != CollisionShapeType::SOLID &&
+        collision_x != CollisionShapeType::GROUND &&
         collision_x != CollisionShapeType::DOOR &&
         !WouldBlockingEnemyOverlapPlayer(enemy, test_position_x, player_position, player_half_extents))
         updated_position.x = test_position_x.x;
@@ -507,6 +508,7 @@ static void MoveEnemyWithScenarioCollision(
     test_position_z.z += movement.z;
     CollisionShapeType collision_z = CollidesWithScenario(test_position_z, scenario_collision_shapes, test_half_extents);
     if (collision_z != CollisionShapeType::SOLID &&
+        collision_z != CollisionShapeType::GROUND &&
         collision_z != CollisionShapeType::DOOR &&
         !WouldBlockingEnemyOverlapPlayer(enemy, test_position_z, player_position, player_half_extents))
         updated_position.z = test_position_z.z;
@@ -1280,6 +1282,7 @@ void UpdateEnemyProjectiles(float delta_time, const EnemyUpdateContext &context)
 
         if (projectile.lifetime_seconds >= projectile.max_lifetime_seconds ||
             scenario_hit == CollisionShapeType::SOLID ||
+            scenario_hit == CollisionShapeType::GROUND ||
             scenario_hit == CollisionShapeType::DOOR)
         {
             projectile.active = false;

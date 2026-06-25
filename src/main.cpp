@@ -1185,8 +1185,12 @@ CollisionShape BuildCollisionShapeFromInstance(const SceneObjectInstance& inst)
     // Determina o tipo de colisão
     if (inst.collision_type == "DOOR")
         shape.type = CollisionShapeType::DOOR;
+    else if (inst.collision_type == "GROUND")
+        shape.type = CollisionShapeType::GROUND;
     else if (inst.collision_type == "VINES")
         shape.type = CollisionShapeType::VINES;
+    else if (inst.collision_type == "GHOST_LADDER")
+        shape.type = CollisionShapeType::GHOST_LADDER;
     else if (inst.collision_type == "LADDER")
         shape.type = CollisionShapeType::LADDER;
     else if (inst.collision_type == "WATER")
@@ -1642,9 +1646,29 @@ static ProjectileCollisionResult QueryProjectileCollision(const ProjectileState 
     const CollisionShapeType scenario_hit =
         CollidesWithScenario(projectile.position, g_ScenarioCollisionShapes, projectile_half_extents);
 
-    if (scenario_hit == CollisionShapeType::SOLID || scenario_hit == CollisionShapeType::DOOR)
+    if (scenario_hit == CollisionShapeType::SOLID || scenario_hit == CollisionShapeType::GROUND || scenario_hit == CollisionShapeType::DOOR)
     {
         return {ProjectileCollisionTarget::SCENARIO, scenario_hit, -1, -1};
+    }
+
+    for (size_t i = 0; i < g_GhostLadders.size(); ++i)
+    {
+        if (g_GhostLadders[i].state != GhostLadderState::FLOATING)
+            continue;
+
+        const GhostLadderInstance &gl = g_GhostLadders[i];
+        glm::vec4 adj_min = gl.bbox_min + glm::vec4(0.0f, gl.current_y_offset, 0.0f, 0.0f);
+        glm::vec4 adj_max = gl.bbox_max + glm::vec4(0.0f, gl.current_y_offset, 0.0f, 0.0f);
+
+        if (projectile.position.x + projectile_half_extents.x > adj_min.x &&
+            projectile.position.x - projectile_half_extents.x < adj_max.x &&
+            projectile.position.y + projectile_half_extents.y > adj_min.y &&
+            projectile.position.y - projectile_half_extents.y < adj_max.y &&
+            projectile.position.z + projectile_half_extents.z > adj_min.z &&
+            projectile.position.z - projectile_half_extents.z < adj_max.z)
+        {
+            return {ProjectileCollisionTarget::INTERACTIVE_OBJECT, CollisionShapeType::GHOST_LADDER, -1, (int)i};
+        }
     }
 
     const int enemy_index = QueryEnemyHitByPlayerProjectile(projectile.position, projectile.radius);
@@ -1702,12 +1726,92 @@ static void UpdateSlingshotProjectile(float delta_time)
         if (hit_result.target == ProjectileCollisionTarget::ENEMY && hit_result.enemy_index >= 0)
         {
             ApplyPlayerProjectileDamageToEnemy(hit_result.enemy_index, 1);
-            // TODO: Integrar dano do estilingue com o futuro sistema de ataque do jogador.
         }
 
-        // TODO: Usar ponto de contato e normal reais quando a colisao expuser esses dados.
+        if (hit_result.target == ProjectileCollisionTarget::INTERACTIVE_OBJECT &&
+            hit_result.scenario_shape_type == CollisionShapeType::GHOST_LADDER &&
+            hit_result.object_index >= 0 && hit_result.object_index < (int)g_GhostLadders.size())
+        {
+            g_GhostLadders[hit_result.object_index].state = GhostLadderState::FALLING;
+            printf("[GHOST LADDER] Ghost ladder %d started falling!\n", hit_result.object_index);
+        }
+
         SpawnSlingshotImpact(g_SlingshotProjectile.position);
         g_SlingshotProjectile.is_active = false;
+    }
+}
+
+static void UpdateGhostLadders(float delta_time)
+{
+    const float fall_speed = -15.0f;
+
+    for (auto &gl : g_GhostLadders)
+    {
+        if (gl.state != GhostLadderState::FALLING)
+            continue;
+
+        gl.current_y_offset += fall_speed * delta_time;
+
+        glm::vec4 full_half = (gl.bbox_max - gl.bbox_min) * 0.5f;
+        full_half.w = 0.0f;
+        glm::vec4 full_center = gl.bbox_center + glm::vec4(0.0f, gl.current_y_offset, 0.0f, 0.0f);
+
+        CollisionOBB test_obb = {full_center, full_half, 0.0f};
+
+        // Encontra a altura maxima do triangulo de GROUND que colide com a ghost ladder
+        float best_ground_y = -1e10f;
+        for (const auto &shape : g_ScenarioCollisionShapes)
+        {
+            if (shape.type != CollisionShapeType::GROUND)
+                continue;
+
+            CollisionAABB obb_aabb = ComputeObbAabb(test_obb);
+            CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
+            if (!AabbAabbIntersect(obb_aabb, shape_aabb))
+                continue;
+
+            for (const auto &tri : shape.triangles)
+            {
+                if (!TriangleIntersectsObb(tri, test_obb))
+                    continue;
+
+                // So aceita triangulo cuja media dos vertices esta abaixo do centro
+                float tri_mid_y = (tri.v1.y + tri.v2.y + tri.v3.y) / 3.0f;
+                if (tri_mid_y >= full_center.y)
+                    continue;
+
+                if (tri_mid_y > best_ground_y)
+                    best_ground_y = tri_mid_y;
+            }
+        }
+
+        static int dbgCounter = 0;
+        if (++dbgCounter % 60 == 0)
+        {
+            int groundCount = 0, solidCount = 0;
+            for (const auto &shape : g_ScenarioCollisionShapes)
+            {
+                if (shape.type == CollisionShapeType::GROUND) groundCount++;
+                if (shape.type == CollisionShapeType::SOLID) solidCount++;
+            }
+            printf("[GHOST LADDER] off=%.2f center=(%.1f,%.1f,%.1f) half=(%.1f,%.1f,%.1f) bestGroundY=%.1f ground=%d solid=%d\n",
+                   gl.current_y_offset, full_center.x, full_center.y, full_center.z,
+                   full_half.x, full_half.y, full_half.z, best_ground_y, groundCount, solidCount);
+        }
+
+        if (best_ground_y > -1e9f)
+        {
+            // A base da ghost ladder deve ficar logo acima do chao
+            // bottom_y = full_center.y - full_half.y  deve ser >= best_ground_y
+            // full_center.y = gl.bbox_center.y + y_offset
+            // gl.bbox_center.y + target_offset - full_half.y = best_ground_y + 0.01f
+            float target_offset = best_ground_y + 0.01f + full_half.y - gl.bbox_center.y;
+            gl.current_y_offset = target_offset;
+            gl.state = GhostLadderState::GROUNDED;
+            printf("[GHOST LADDER] Grounded: y_offset=%.2f bottom=%.2f\n",
+                   gl.current_y_offset,
+                   gl.bbox_center.y + gl.current_y_offset - full_half.y);
+        }
     }
 }
 
@@ -2659,11 +2763,74 @@ int main()
                 part.collision_shapes, part.bbox_min, part.bbox_max);
         }
 
+        // --- Extrai colisao GHOST_LADDER do map.obj ---
+        for (size_t shape = 0; shape < map_model.shapes.size(); ++shape)
+        {
+            const std::string &sname = map_model.shapes[shape].name;
+            if (sname.find("GHOST_LADDER") == std::string::npos)
+                continue;
+
+            CollisionShape shape_collision;
+            shape_collision.type = CollisionShapeType::GHOST_LADDER;
+            shape_collision.bbox_min = glm::vec4(+std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), 1.0f);
+            shape_collision.bbox_max = glm::vec4(-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(), 1.0f);
+
+            const size_t num_triangles = map_model.shapes[shape].mesh.num_face_vertices.size();
+            shape_collision.triangles.reserve(num_triangles);
+
+            glm::mat4 model_matrix = Matrix_Identity();
+
+            for (size_t triangle = 0; triangle < num_triangles; ++triangle)
+            {
+                assert(map_model.shapes[shape].mesh.num_face_vertices[triangle] == 3);
+
+                Triangle world_triangle;
+                for (size_t vertex = 0; vertex < 3; ++vertex)
+                {
+                    const tinyobj::index_t idx = map_model.shapes[shape].mesh.indices[3 * triangle + vertex];
+                    const glm::vec4 p_model(
+                        map_model.attrib.vertices[3 * idx.vertex_index + 0],
+                        map_model.attrib.vertices[3 * idx.vertex_index + 1],
+                        map_model.attrib.vertices[3 * idx.vertex_index + 2],
+                        1.0f);
+                    const glm::vec4 p_world = model_matrix * p_model;
+                    const glm::vec4 p = glm::vec4(p_world.x, p_world.y, p_world.z, 1.0f);
+
+                    if (vertex == 0) world_triangle.v1 = p;
+                    if (vertex == 1) world_triangle.v2 = p;
+                    if (vertex == 2) world_triangle.v3 = p;
+
+                    shape_collision.bbox_min.x = std::min(shape_collision.bbox_min.x, p.x);
+                    shape_collision.bbox_min.y = std::min(shape_collision.bbox_min.y, p.y);
+                    shape_collision.bbox_min.z = std::min(shape_collision.bbox_min.z, p.z);
+                    shape_collision.bbox_max.x = std::max(shape_collision.bbox_max.x, p.x);
+                    shape_collision.bbox_max.y = std::max(shape_collision.bbox_max.y, p.y);
+                    shape_collision.bbox_max.z = std::max(shape_collision.bbox_max.z, p.z);
+                }
+                shape_collision.triangles.push_back(world_triangle);
+            }
+
+            part.collision_shapes.push_back(shape_collision);
+            printf("  GHOST_LADDER collision extraida do map.obj: %zu triangulos\n", shape_collision.triangles.size());
+        }
+
         printf("  Collision AABB: [%.1f,%.1f,%.1f] a [%.1f,%.1f,%.1f]\n",
                part.bbox_min.x, part.bbox_min.y, part.bbox_min.z,
                part.bbox_max.x, part.bbox_max.y, part.bbox_max.z);
         printf("  Shapes de colisao: %zu, objetos visuais: %zu\n",
                part.collision_shapes.size(), part.render_object_names.size());
+
+        // Debug: conta tipos de colisao por cena
+        {
+            int groundCount = 0, solidCount = 0, otherCount = 0;
+            for (const auto &cs : part.collision_shapes)
+            {
+                if (cs.type == CollisionShapeType::GROUND) groundCount++;
+                else if (cs.type == CollisionShapeType::SOLID) solidCount++;
+                else otherCount++;
+            }
+            printf("  Collision types: GROUND=%d SOLID=%d OTHER=%d\n", groundCount, solidCount, otherCount);
+        }
 
         // Atualiza bounds globais
         g_ScenarioBoundsMin.x = std::min(g_ScenarioBoundsMin.x, part.bbox_min.x);
@@ -2822,6 +2989,31 @@ int main()
     }
     printf("Total de cobwebs: %zu\n", g_Cobwebs.size());
 
+    // Coleta todas as ghost ladders (GHOST_LADDER) de todas as cenas
+    g_GhostLadders.clear();
+    for (size_t part_idx = 0; part_idx < g_SceneParts.size(); ++part_idx)
+    {
+        for (size_t si = 0; si < g_SceneParts[part_idx].collision_shapes.size(); ++si)
+        {
+            const CollisionShape &cs = g_SceneParts[part_idx].collision_shapes[si];
+            if (cs.type == CollisionShapeType::GHOST_LADDER)
+            {
+                GhostLadderInstance gl;
+                gl.state = GhostLadderState::FLOATING;
+                gl.current_y_offset = 0.0f;
+                gl.bbox_center = (cs.bbox_min + cs.bbox_max) * 0.5f;
+                gl.bbox_min = cs.bbox_min;
+                gl.bbox_max = cs.bbox_max;
+                gl.original_triangles = cs.triangles;
+                gl.scene_part_index = (int)part_idx;
+                g_GhostLadders.push_back(gl);
+                printf("  Ghost ladder encontrada: center=(%.1f,%.1f,%.1f)\n",
+                       gl.bbox_center.x, gl.bbox_center.y, gl.bbox_center.z);
+            }
+        }
+    }
+    printf("Total de ghost ladders: %zu\n", g_GhostLadders.size());
+
     // Computa adjacencia entre as cenas (AABB overlap com margem)
     printf("\n=== Computando adjacencia entre cenas ===\n");
     const float adjacency_margin = 1.5f;
@@ -2891,7 +3083,8 @@ int main()
         for (size_t idx : g_CurrentActiveSceneIndices)
         {
             for (auto &cs : g_SceneParts[idx].collision_shapes)
-                g_ScenarioCollisionShapes.push_back(cs);
+                if (cs.type != CollisionShapeType::GHOST_LADDER)
+                    g_ScenarioCollisionShapes.push_back(cs);
         }
 
         printf("Cenas ativas iniciais: %zu (total collision shapes: %zu)\n",
@@ -3412,7 +3605,7 @@ int main()
 
         g_PlayerStateMachine.Update(g_WPressed, g_SPressed, g_ShiftPressed,
                                     g_AttackPressed, g_DefendPressed, g_SpacePressed,
-                                    g_IsClimbingAVine, g_IsClimbingALadder,
+                                    g_IsClimbingAVine, g_IsClimbingALadder, g_IsClimbingAGhostLadder,
                                     g_PlayerOnGround, delta_time);
 
         if (g_PlayerStateMachine.IsAttacking() && g_PlayerStateMachine.GetPreviousState() != PlayerState::ATTACKING)
@@ -3445,6 +3638,7 @@ int main()
         UpdateEnemyProjectiles(delta_time, enemy_update_context);
         CheckSwordEnemyCollisions(delta_time);
         UpdateParticles(delta_time);
+        UpdateGhostLadders(delta_time);
 
         // --- Sistema de portas ---
         // Detecta ENTER pressionado perto de uma porta
@@ -3768,7 +3962,8 @@ int main()
                         name_str.find("door") != std::string::npos ||
                         name_str.find("CHEST") != std::string::npos ||
                         name_str.find("chest") != std::string::npos ||
-                        name_str.find("COBWEB_FLOORHOLE") != std::string::npos)
+                        name_str.find("COBWEB_FLOORHOLE") != std::string::npos ||
+                        name_str.find("GHOST_LADDER") != std::string::npos)
                         continue;
                 }
 
@@ -3801,6 +3996,46 @@ int main()
                 DrawVirtualObject(name.c_str());
             }
         }
+
+        // --- Desenha ghost ladders com offset de queda ---
+        for (auto &gl : g_GhostLadders)
+        {
+            bool scene_active = false;
+            for (size_t idx : g_CurrentActiveSceneIndices)
+            {
+                if ((int)idx == gl.scene_part_index)
+                {
+                    scene_active = true;
+                    break;
+                }
+            }
+            if (!scene_active)
+                continue;
+
+            glm::mat4 ghost_model = model;
+            ghost_model = Matrix_Translate(0.0f, gl.current_y_offset, 0.0f) * ghost_model;
+            glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(ghost_model));
+            glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE,
+                               glm::value_ptr(glm::transpose(glm::inverse(ghost_model))));
+            glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
+            glUniform3f(g_object_tint_uniform, 1.0f, 1.0f, 1.0f);
+
+            for (size_t part_idx : g_CurrentActiveSceneIndices)
+            {
+                if ((int)part_idx != gl.scene_part_index)
+                    continue;
+                for (auto &name : g_SceneParts[part_idx].render_object_names)
+                {
+                    std::string name_str(name);
+                    if (name_str.find("GHOST_LADDER") == std::string::npos)
+                        continue;
+                    DrawVirtualObject(name.c_str());
+                }
+            }
+        }
+
+        glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+        glUniformMatrix4fv(g_model_normal_matrix_uniform, 1, GL_FALSE, glm::value_ptr(glm::transpose(glm::inverse(model))));
 
         // --- Desenha objetos do objects.json (instâncias reutilizáveis) ---
         for (size_t idx : g_CurrentActiveSceneIndices)
@@ -4317,6 +4552,24 @@ int main()
                     glm::vec4 vine_color(1.0f, 0.0f, 1.0f, 1.0f);
                     DrawDebugAABB(vine_center, vine_half, vine_color);
                 }
+            }
+
+            // Draw ghost ladder hitboxes (cyan wireframe)
+            for (const auto &gl : g_GhostLadders)
+            {
+                glm::vec4 gl_center = (gl.bbox_min + gl.bbox_max) * 0.5f;
+                gl_center.y += gl.current_y_offset;
+                glm::vec4 gl_half = (gl.bbox_max - gl.bbox_min) * 0.5f;
+                gl_center.w = 1.0f;
+                gl_half.w = 0.0f;
+                glm::vec4 gl_color;
+                switch (gl.state)
+                {
+                    case GhostLadderState::FLOATING: gl_color = glm::vec4(0.5f, 0.5f, 1.0f, 1.0f); break;
+                    case GhostLadderState::FALLING:  gl_color = glm::vec4(1.0f, 0.5f, 0.0f, 1.0f); break;
+                    case GhostLadderState::GROUNDED: gl_color = glm::vec4(0.0f, 1.0f, 1.0f, 1.0f); break;
+                }
+                DrawDebugAABB(gl_center, gl_half, gl_color);
             }
 
             // Draw SOLID hitboxes (dark green wireframe)
@@ -5397,6 +5650,10 @@ void BuildCollisionDataFromObjModel(ObjModel *model, glm::mat4 model_matrix)
         {
             shape_collision.type = CollisionShapeType::VINES;
         }
+        else if (model->shapes[shape].name.find("GHOST_LADDER") != std::string::npos)
+        {
+            shape_collision.type = CollisionShapeType::GHOST_LADDER;
+        }
         else if (model->shapes[shape].name.find("LADDER") != std::string::npos)
         {
             shape_collision.type = CollisionShapeType::LADDER;
@@ -5404,6 +5661,10 @@ void BuildCollisionDataFromObjModel(ObjModel *model, glm::mat4 model_matrix)
         else if (model->shapes[shape].name.find("WATER") != std::string::npos)
         {
             shape_collision.type = CollisionShapeType::WATER;
+        }
+        else if (model->shapes[shape].name.find("GROUND") != std::string::npos)
+        {
+            shape_collision.type = CollisionShapeType::GROUND;
         }
         else
         {
@@ -5483,6 +5744,10 @@ void BuildCollisionDataIntoVector(ObjModel *model, glm::mat4 model_matrix,
         {
             shape_collision.type = CollisionShapeType::VINES;
         }
+        else if (model->shapes[shape].name.find("GHOST_LADDER") != std::string::npos)
+        {
+            shape_collision.type = CollisionShapeType::GHOST_LADDER;
+        }
         else if (model->shapes[shape].name.find("LADDER") != std::string::npos)
         {
             shape_collision.type = CollisionShapeType::LADDER;
@@ -5490,6 +5755,10 @@ void BuildCollisionDataIntoVector(ObjModel *model, glm::mat4 model_matrix,
         else if (model->shapes[shape].name.find("WATER") != std::string::npos)
         {
             shape_collision.type = CollisionShapeType::WATER;
+        }
+        else if (model->shapes[shape].name.find("GROUND") != std::string::npos)
+        {
+            shape_collision.type = CollisionShapeType::GROUND;
         }
         else
         {
@@ -5903,7 +6172,7 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
         glfwSetWindowShouldClose(window, GL_TRUE);
 
     // Se o usuário apertar a tecla P, mudará o tipo de câmera entre primeira pessoa e terceira pessoa. Veja definição das variáveis globais g_FirstPersonCamera e g_ThirdPersonCamera no início deste arquivo.
-    if (key == GLFW_KEY_P && action == GLFW_PRESS && !g_IsClimbingAVine && !g_IsClimbingALadder)
+    if (key == GLFW_KEY_P && action == GLFW_PRESS && !g_IsClimbingAVine && !g_IsClimbingALadder && !g_IsClimbingAGhostLadder)
     {
         if (g_CameraMode == CameraMode::FirstPerson)
             EnterThirdPersonCamera();
@@ -6008,49 +6277,51 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
     // Se já está escalando algo, O para. Se não, O inicia o tipo mais próximo.
     if (key == GLFW_KEY_O && action == GLFW_PRESS)
     {
-        printf("[O KEY] pressed. climbingVine=%d climbingLadder=%d collidedVine=%d collidedLadder=%d\n",
-               g_IsClimbingAVine, g_IsClimbingALadder, g_CollidedWithAVine, g_CollidedWithALadder);
-        printf("[O KEY] pos=(%.1f,%.1f,%.1f) onGround=%d\n",
-               g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
-               g_PlayerOnGround);
 
         if (g_IsClimbingAVine)
         {
             g_IsClimbingAVine = false;
             CollisionOBB ground_test = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
             CollisionShapeType ground_col = CollidesWithScenarioObb(ground_test, g_ScenarioCollisionShapes);
-            g_PlayerOnGround = (ground_col == CollisionShapeType::SOLID);
+            g_PlayerOnGround = (ground_col == CollisionShapeType::SOLID || ground_col == CollisionShapeType::GROUND);;
             g_PlayerVerticalVelocity = 0.0f;
             g_SpacePressed = false;
             g_AttackPressed = false;
-            printf("[O KEY] Stopped vine. ground_col=%d onGround=%d\n", (int)ground_col, g_PlayerOnGround);
         }
         else if (g_IsClimbingALadder)
         {
             g_IsClimbingALadder = false;
             CollisionOBB ground_test = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
             CollisionShapeType ground_col = CollidesWithScenarioObb(ground_test, g_ScenarioCollisionShapes);
-            g_PlayerOnGround = (ground_col == CollisionShapeType::SOLID);
+            g_PlayerOnGround = (ground_col == CollisionShapeType::SOLID || ground_col == CollisionShapeType::GROUND);;
             g_PlayerVerticalVelocity = 0.0f;
             g_SpacePressed = false;
             g_AttackPressed = false;
-            printf("[O KEY] Stopped ladder. ground_col=%d onGround=%d\n", (int)ground_col, g_PlayerOnGround);
+        }
+        else if (g_IsClimbingAGhostLadder)
+        {
+            g_IsClimbingAGhostLadder = false;
+            CollisionOBB ground_test = {g_PlayerCubePosition, g_PlayerCubeHalfExtents, g_PlayerYaw};
+            CollisionShapeType ground_col = CollidesWithScenarioObb(ground_test, g_ScenarioCollisionShapes);
+            g_PlayerOnGround = (ground_col == CollisionShapeType::SOLID || ground_col == CollisionShapeType::GROUND);;
+            g_PlayerVerticalVelocity = 0.0f;
+            g_SpacePressed = false;
+            g_AttackPressed = false;
         }
         else if (g_CollidedWithALadder)
         {
             g_IsClimbingALadder = true;
             g_PlayerVerticalVelocity = 0.0f;
-            printf("[O KEY] Started ladder!\n");
         }
         else if (g_CollidedWithAVine)
         {
             g_IsClimbingAVine = true;
             g_PlayerVerticalVelocity = 0.0f;
-            printf("[O KEY] Started vine!\n");
         }
-        else
+        else if (g_CollidedWithAGhostLadder)
         {
-            printf("[O KEY] No vine/ladder nearby to start climbing.\n");
+            g_IsClimbingAGhostLadder = true;
+            g_PlayerVerticalVelocity = 0.0f;
         }
     }
 

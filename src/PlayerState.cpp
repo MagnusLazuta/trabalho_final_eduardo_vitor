@@ -16,6 +16,7 @@ int PlayerStateMachine::GetAnimationIndex() const {
         case PlayerState::RUNNING:          return 3;
         case PlayerState::CLIMBING_VINE:    return 2;
         case PlayerState::CLIMBING_LADDER:  return 2;
+        case PlayerState::CLIMBING_GHOST_LADDER: return 2;
         case PlayerState::ATTACKING:        return 6 + m_attackVariant;
         case PlayerState::DEFENDING:        return 5;
         case PlayerState::JUMPING:          return 6;
@@ -36,7 +37,7 @@ float PlayerStateMachine::GetMovementSpeed() const {
 
 void PlayerStateMachine::Update(bool wPressed, bool sPressed, bool shiftPressed,
                                 bool attackPressed, bool defendPressed, bool jumpPressed,
-                                bool isClimbingVine, bool isClimbingLadder,
+                                bool isClimbingVine, bool isClimbingLadder, bool isClimbingGhostLadder,
                                 bool onGround, float deltaTime)
 {
     m_previousState = m_currentState;
@@ -44,6 +45,10 @@ void PlayerStateMachine::Update(bool wPressed, bool sPressed, bool shiftPressed,
     bool wantsMove = wPressed || sPressed ||
                      (g_LockOnMovementActive && (g_APressed || g_DPressed));
 
+    if (isClimbingGhostLadder) {
+        m_currentState = PlayerState::CLIMBING_GHOST_LADDER;
+        return;
+    }
     if (isClimbingLadder) {
         m_currentState = PlayerState::CLIMBING_LADDER;
         return;

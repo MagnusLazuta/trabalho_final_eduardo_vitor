@@ -36,9 +36,11 @@ struct CollisionOBB
 enum class CollisionShapeType
 {
     SOLID,
+    GROUND,
     DOOR,
     NONE,
     WATER,
+    GHOST_LADDER,
     LADDER,
     COBWEB_FLOORHOLE,
     VINES,
@@ -98,6 +100,24 @@ struct CobwebInstance
     glm::vec4 bbox_center = glm::vec4(0.0f);
     glm::vec4 bbox_min = glm::vec4(0.0f);
     glm::vec4 bbox_max = glm::vec4(0.0f);
+};
+
+enum class GhostLadderState
+{
+    FLOATING,
+    FALLING,
+    GROUNDED,
+};
+
+struct GhostLadderInstance
+{
+    GhostLadderState state = GhostLadderState::FLOATING;
+    float current_y_offset = 0.0f;
+    glm::vec4 bbox_center = glm::vec4(0.0f);
+    glm::vec4 bbox_min = glm::vec4(0.0f);
+    glm::vec4 bbox_max = glm::vec4(0.0f);
+    std::vector<Triangle> original_triangles;
+    int scene_part_index = -1;
 };
 
 // Broad Phase: AABB vs AABB

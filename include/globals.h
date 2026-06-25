@@ -51,3 +51,8 @@ extern std::vector<ChestInstance> g_Chests;
 // Sistema de cobweb (buraco no chão)
 extern std::vector<CobwebInstance> g_Cobwebs;
 extern float g_CobwebFallSpeedThreshold;
+
+// Sistema de ghost ladder (escada fantasma)
+extern std::vector<GhostLadderInstance> g_GhostLadders;
+extern bool g_CollidedWithAGhostLadder;
+extern bool g_IsClimbingAGhostLadder;
