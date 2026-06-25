@@ -93,10 +93,12 @@ struct EnemyProjectile
     EnemyProjectileType type;
     glm::vec4 position;
     glm::vec4 velocity;
+    glm::vec4 source_position;
     glm::vec4 scale;
     float lifetime_seconds;
     float max_lifetime_seconds;
     bool active;
+    bool reflected_by_player;
 };
 
 struct RenderModelInfo
@@ -111,6 +113,8 @@ struct EnemyUpdateContext
 {
     glm::vec4 player_position;
     glm::vec4 player_half_extents;
+    float player_yaw;
+    bool player_defending;
     const std::vector<CollisionShape> *scenario_collision_shapes;
 };
 

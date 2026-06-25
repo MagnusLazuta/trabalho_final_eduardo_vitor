@@ -29,9 +29,12 @@ static const float DEKU_SCRUB_STUN_DURATION = 3.0f;
 static const float SKULLWALLTULA_SCALE = 1.2f;
 static const float SKULLWALLTULA_VERTICAL_RANGE = 1.0f;
 static const float SKULLWALLTULA_SPEED = 0.3f;
+static const float SKULLWALLTULA_VERTICAL_SPEED = SKULLWALLTULA_VERTICAL_RANGE * SKULLWALLTULA_SPEED;
 static const float SKULLWALLTULA_CONTACT_RADIUS_BONUS = 0.04f;
 static const float SKULLWALLTULA_ALERT_RADIUS = 1.9f;
 static const float SKULLWALLTULA_ATTACK_TILT = 0.22f;
+static const float SKULLWALLTULA_CLIMB_TILT = 0.20f;
+static const float SKULLWALLTULA_WALL_PROBE_DISTANCE = 2.5f;
 static const float BIG_SKULLTULA_SCALE = 2.8f;
 static const float BIG_SKULLTULA_TURN_SPEED = 2.4f;
 static const float BIG_SKULLTULA_ATTACK_RADIUS = 2.0f;
@@ -317,6 +320,23 @@ static bool TryCreateEnemyFromScriptSpawn(const ScriptEnemySpawn &spawn, Enemy &
         return true;
     }
 
+    if (spawn.type == "scrub")
+    {
+        out_enemy = MakeEnemy(
+            EnemyType::DEKU_SCRUB,
+            EnemyState::Hidden,
+            spawn.position,
+            glm::vec4(1.0f, 1.0f, 1.0f, 0.0f),
+            glm::vec4(0.95f, 0.95f, 0.95f, 0.0f),
+            2,
+            6.2f,
+            5.5f,
+            1.7f,
+            "nodes_12__meshes[2]");
+        out_enemy.debug_color = glm::vec4(0.86f, 0.58f, 0.22f, 1.0f);
+        return true;
+    }
+
     if (spawn.type == "small spider")
     {
         out_enemy = MakeEnemy(
@@ -334,6 +354,23 @@ static bool TryCreateEnemyFromScriptSpawn(const ScriptEnemySpawn &spawn, Enemy &
         out_enemy.timer_b = PI;
         out_enemy.blocks_movement = true;
         out_enemy.debug_color = glm::vec4(0.72f, 0.72f, 0.72f, 1.0f);
+        return true;
+    }
+
+    if (spawn.type == "big spider")
+    {
+        out_enemy = MakeEnemy(
+            EnemyType::BIG_SKULLTULA,
+            EnemyState::Turning,
+            spawn.position,
+            glm::vec4(BIG_SKULLTULA_SCALE, BIG_SKULLTULA_SCALE, BIG_SKULLTULA_SCALE, 0.0f),
+            glm::vec4(1.40f, 1.50f, 1.40f, 0.0f),
+            3,
+            0.0f,
+            1.8f,
+            2.4f,
+            "Only_Spider_with_Animations_Export");
+        out_enemy.debug_color = glm::vec4(0.96f, 0.58f, 0.14f, 1.0f);
         return true;
     }
 
@@ -461,6 +498,12 @@ static bool EnemyBlocksPlayerMovement(const Enemy &enemy)
            enemy.state != EnemyState::Dying;
 }
 
+static bool IsBlockingScenarioCollision(CollisionShapeType collision)
+{
+    return collision == CollisionShapeType::SOLID ||
+           collision == CollisionShapeType::DOOR;
+}
+
 static glm::vec4 GetEnemyMovementBlockHalfExtents(const Enemy &enemy)
 {
     if (enemy.blocks_movement)
@@ -498,22 +541,153 @@ static void MoveEnemyWithScenarioCollision(
     glm::vec4 test_position_x = updated_position;
     test_position_x.x += movement.x;
     CollisionShapeType collision_x = CollidesWithScenario(test_position_x, scenario_collision_shapes, test_half_extents);
-    if (collision_x != CollisionShapeType::SOLID &&
-        collision_x != CollisionShapeType::GROUND &&
-        collision_x != CollisionShapeType::DOOR &&
+    if (!IsBlockingScenarioCollision(collision_x) &&
         !WouldBlockingEnemyOverlapPlayer(enemy, test_position_x, player_position, player_half_extents))
         updated_position.x = test_position_x.x;
 
     glm::vec4 test_position_z = updated_position;
     test_position_z.z += movement.z;
     CollisionShapeType collision_z = CollidesWithScenario(test_position_z, scenario_collision_shapes, test_half_extents);
-    if (collision_z != CollisionShapeType::SOLID &&
-        collision_z != CollisionShapeType::GROUND &&
-        collision_z != CollisionShapeType::DOOR &&
+    if (!IsBlockingScenarioCollision(collision_z) &&
         !WouldBlockingEnemyOverlapPlayer(enemy, test_position_z, player_position, player_half_extents))
         updated_position.z = test_position_z.z;
 
     enemy.position = updated_position;
+}
+
+static void MoveSkullwalltulaVertically(Enemy &enemy, float delta_time, const EnemyUpdateContext &context)
+{
+    if (!context.scenario_collision_shapes)
+        return;
+
+    if (std::fabs(enemy.velocity.y) <= 1e-5f)
+        enemy.velocity.y = SKULLWALLTULA_VERTICAL_SPEED;
+
+    float min_y = enemy.spawn_position.y - SKULLWALLTULA_VERTICAL_RANGE;
+    float max_y = enemy.spawn_position.y + SKULLWALLTULA_VERTICAL_RANGE;
+
+    CollisionRay ray_down = {enemy.position, glm::vec4(0.0f, -1.0f, 0.0f, 0.0f)};
+    CollisionRay ray_up = {enemy.position, glm::vec4(0.0f, 1.0f, 0.0f, 0.0f)};
+    float floor_distance = 0.0f;
+    float ceiling_distance = 0.0f;
+
+    for (std::size_t shape_index = 0; shape_index < context.scenario_collision_shapes->size(); ++shape_index)
+    {
+        const CollisionShape &shape = (*context.scenario_collision_shapes)[shape_index];
+        if (!IsBlockingScenarioCollision(shape.type))
+            continue;
+
+        for (std::size_t triangle_index = 0; triangle_index < shape.triangles.size(); ++triangle_index)
+        {
+            const Triangle &triangle = shape.triangles[triangle_index];
+            glm::vec4 edge_a = triangle.v2 - triangle.v1;
+            glm::vec4 edge_b = triangle.v3 - triangle.v1;
+            edge_a.w = 0.0f;
+            edge_b.w = 0.0f;
+
+            glm::vec4 normal = crossproduct(edge_a, edge_b);
+            normal.w = 0.0f;
+            const float normal_length = norm(normal);
+            if (normal_length <= 1e-5f)
+                continue;
+
+            normal = normal / normal_length;
+            if (std::fabs(normal.y) < 0.55f)
+                continue;
+
+            CollisionTriangle collision_triangle = {triangle.v1, triangle.v2, triangle.v3};
+            if (RayTriangleIntersect(ray_down, collision_triangle, floor_distance))
+                min_y = std::max(min_y, enemy.position.y - floor_distance + enemy.collision_half_extents.y);
+            if (RayTriangleIntersect(ray_up, collision_triangle, ceiling_distance))
+                max_y = std::min(max_y, enemy.position.y + ceiling_distance - enemy.collision_half_extents.y);
+        }
+    }
+
+    if (min_y > max_y)
+    {
+        const float midpoint_y = 0.5f * (min_y + max_y);
+        min_y = midpoint_y;
+        max_y = midpoint_y;
+    }
+
+    float next_y = enemy.position.y + enemy.velocity.y * delta_time;
+
+    if (next_y < min_y || next_y > max_y)
+    {
+        next_y = std::max(min_y, std::min(max_y, next_y));
+        enemy.velocity.y *= -1.0f;
+    }
+
+    enemy.position.y = next_y;
+}
+
+static void AlignSkullwalltulaToNearbyWall(Enemy &enemy, const EnemyUpdateContext &context)
+{
+    if (!context.scenario_collision_shapes)
+        return;
+
+    const glm::vec4 probe_directions[] = {
+        glm::vec4(1.0f, 0.0f, 0.0f, 0.0f),
+        glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f),
+        glm::vec4(0.0f, 0.0f, 1.0f, 0.0f),
+        glm::vec4(0.0f, 0.0f, -1.0f, 0.0f),
+        NormalizeXZ(glm::vec4(1.0f, 0.0f, 1.0f, 0.0f)),
+        NormalizeXZ(glm::vec4(-1.0f, 0.0f, 1.0f, 0.0f)),
+        NormalizeXZ(glm::vec4(1.0f, 0.0f, -1.0f, 0.0f)),
+        NormalizeXZ(glm::vec4(-1.0f, 0.0f, -1.0f, 0.0f))};
+
+    bool found_wall = false;
+    float closest_distance = SKULLWALLTULA_WALL_PROBE_DISTANCE;
+    glm::vec4 closest_direction = ForwardFromYaw(enemy.timer_b);
+
+    for (std::size_t direction_index = 0; direction_index < sizeof(probe_directions) / sizeof(probe_directions[0]); ++direction_index)
+    {
+        CollisionRay ray = {enemy.position, probe_directions[direction_index]};
+
+        for (std::size_t shape_index = 0; shape_index < context.scenario_collision_shapes->size(); ++shape_index)
+        {
+            const CollisionShape &shape = (*context.scenario_collision_shapes)[shape_index];
+            if (!IsBlockingScenarioCollision(shape.type))
+                continue;
+
+            for (std::size_t triangle_index = 0; triangle_index < shape.triangles.size(); ++triangle_index)
+            {
+                const Triangle &triangle = shape.triangles[triangle_index];
+                glm::vec4 edge_a = triangle.v2 - triangle.v1;
+                glm::vec4 edge_b = triangle.v3 - triangle.v1;
+                edge_a.w = 0.0f;
+                edge_b.w = 0.0f;
+
+                glm::vec4 normal = crossproduct(edge_a, edge_b);
+                normal.w = 0.0f;
+                const float normal_length = norm(normal);
+                if (normal_length <= 1e-5f)
+                    continue;
+
+                normal = normal / normal_length;
+                if (std::fabs(normal.y) > 0.45f)
+                    continue;
+
+                float hit_distance = 0.0f;
+                CollisionTriangle collision_triangle = {triangle.v1, triangle.v2, triangle.v3};
+                if (!RayTriangleIntersect(ray, collision_triangle, hit_distance))
+                    continue;
+
+                if (hit_distance <= closest_distance)
+                {
+                    closest_distance = hit_distance;
+                    closest_direction = probe_directions[direction_index];
+                    found_wall = true;
+                }
+            }
+        }
+    }
+
+    if (found_wall)
+    {
+        enemy.yaw = std::atan2(closest_direction.x, closest_direction.z);
+        enemy.timer_b = enemy.yaw;
+    }
 }
 
 static bool IsWallMountedEnemy(const Enemy &enemy)
@@ -660,6 +834,7 @@ static void SpawnEnemyProjectile(
     EnemyProjectileType type,
     const glm::vec4 &position,
     const glm::vec4 &velocity,
+    const glm::vec4 &source_position,
     float max_lifetime_seconds,
     float scale)
 {
@@ -667,17 +842,19 @@ static void SpawnEnemyProjectile(
     projectile.type = type;
     projectile.position = position;
     projectile.velocity = velocity;
+    projectile.source_position = source_position;
     projectile.scale = glm::vec4(scale, scale, scale, 0.0f);
     projectile.lifetime_seconds = 0.0f;
     projectile.max_lifetime_seconds = max_lifetime_seconds;
     projectile.active = true;
+    projectile.reflected_by_player = false;
     g_EnemyProjectiles.push_back(projectile);
 }
 
 static void SpawnDekuScrubProjectile(const Enemy &enemy, const glm::vec4 &direction_to_player)
 {
     const glm::vec4 forward = NormalizeXZ(direction_to_player);
-    const glm::vec4 velocity = forward * 6.5f;
+    const glm::vec4 velocity = forward * 5.6f;
     const glm::vec4 spawn_offset =
         forward * 0.58f +
         glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
@@ -686,8 +863,51 @@ static void SpawnDekuScrubProjectile(const Enemy &enemy, const glm::vec4 &direct
         EnemyProjectileType::DEKU_NUT,
         enemy.position + spawn_offset,
         velocity,
+        enemy.position,
         3.2f,
         0.42f);
+}
+
+static glm::vec4 PlayerForwardFromYaw(float yaw)
+{
+    return glm::vec4(-std::sin(yaw), 0.0f, std::cos(yaw), 0.0f);
+}
+
+static float ProjectileSpeed(const EnemyProjectile &projectile)
+{
+    return std::sqrt(
+        projectile.velocity.x * projectile.velocity.x +
+        projectile.velocity.y * projectile.velocity.y +
+        projectile.velocity.z * projectile.velocity.z);
+}
+
+static bool ShouldReflectProjectileFromPlayerBlock(const EnemyProjectile &projectile, const EnemyUpdateContext &context)
+{
+    if (projectile.type != EnemyProjectileType::DEKU_NUT ||
+        projectile.reflected_by_player ||
+        !context.player_defending)
+    {
+        return false;
+    }
+
+    const glm::vec4 player_forward = PlayerForwardFromYaw(context.player_yaw);
+    const glm::vec4 projectile_direction = NormalizeXZ(projectile.velocity);
+    return dotproduct(projectile_direction, player_forward) < -0.2f;
+}
+
+static void ReflectProjectileFromPlayerBlock(EnemyProjectile &projectile, const EnemyUpdateContext &context)
+{
+    glm::vec4 reflection_direction = NormalizeXZ(projectile.source_position - context.player_position);
+    if (LengthXZ(reflection_direction) <= 1e-5f)
+        reflection_direction = PlayerForwardFromYaw(context.player_yaw);
+
+    const float speed = std::max(ProjectileSpeed(projectile), 5.6f);
+    projectile.velocity = reflection_direction * speed;
+    projectile.position =
+        context.player_position +
+        reflection_direction * (std::max(context.player_half_extents.x, context.player_half_extents.z) + projectile.scale.x + 0.12f);
+    projectile.lifetime_seconds = 0.0f;
+    projectile.reflected_by_player = true;
 }
 
 static void SpawnGohmaLarvaFromEgg(const glm::vec4 &position)
@@ -870,12 +1090,11 @@ static void UpdateDekuScrub(Enemy &enemy, float delta_time, const EnemyUpdateCon
 
 static void UpdateSkullwalltula(Enemy &enemy, float delta_time, const EnemyUpdateContext &context)
 {
-    (void)delta_time;
     enemy.position.x = enemy.spawn_position.x;
     enemy.position.z = enemy.spawn_position.z;
     enemy.yaw = enemy.timer_b;
+    AlignSkullwalltulaToNearbyWall(enemy, context);
     enemy.vulnerable = true;
-    enemy.pitch = 0.0f;
     const float distance_to_player = DistanceXZ(enemy.position, context.player_position);
 
     switch (enemy.state)
@@ -885,14 +1104,14 @@ static void UpdateSkullwalltula(Enemy &enemy, float delta_time, const EnemyUpdat
         {
             enemy.state = EnemyState::Patrol;
             enemy.state_timer = 0.0f;
+            if (std::fabs(enemy.velocity.y) <= 1e-5f)
+                enemy.velocity.y = SKULLWALLTULA_VERTICAL_SPEED;
         }
         enemy.position.y = enemy.spawn_position.y;
         break;
 
     case EnemyState::Patrol:
-        enemy.position.y =
-            enemy.spawn_position.y +
-            std::sin(enemy.animation_timer * SKULLWALLTULA_SPEED + enemy.timer_a) * SKULLWALLTULA_VERTICAL_RANGE;
+        MoveSkullwalltulaVertically(enemy, delta_time, context);
         break;
 
     default:
@@ -902,10 +1121,14 @@ static void UpdateSkullwalltula(Enemy &enemy, float delta_time, const EnemyUpdat
         break;
     }
 
+    enemy.pitch = 0.0f;
+    if (enemy.state == EnemyState::Patrol && std::fabs(enemy.velocity.y) > 1e-5f)
+        enemy.pitch = (enemy.velocity.y > 0.0f) ? SKULLWALLTULA_CLIMB_TILT : -SKULLWALLTULA_CLIMB_TILT;
+
     if (distance_to_player <= SKULLWALLTULA_ALERT_RADIUS)
     {
         const float proximity = 1.0f - Clamp01(distance_to_player / SKULLWALLTULA_ALERT_RADIUS);
-        enemy.pitch = SKULLWALLTULA_ATTACK_TILT * proximity;
+        enemy.pitch += SKULLWALLTULA_ATTACK_TILT * proximity;
     }
 
     if (EnemyAabbIntersectsPointBox(
@@ -1289,11 +1512,28 @@ void UpdateEnemyProjectiles(float delta_time, const EnemyUpdateContext &context)
             continue;
         }
 
+        if (projectile.reflected_by_player)
+        {
+            const int enemy_index = QueryEnemyHitByPlayerProjectile(projectile.position, projectile.scale.x);
+            if (enemy_index >= 0)
+            {
+                ApplyPlayerProjectileDamageToEnemy(enemy_index, 1);
+                projectile.active = false;
+                continue;
+            }
+        }
+
         if (BoxesIntersect(context.player_position, context.player_half_extents, projectile.position, projectile_half_extents))
         {
+            if (ShouldReflectProjectileFromPlayerBlock(projectile, context))
+            {
+                ReflectProjectileFromPlayerBlock(projectile, context);
+                continue;
+            }
+
             projectile.active = false;
             LogPlayerHitByEnemy("projétil inimigo");
-            // TODO: Integrar dano no jogador e reflexão de escudo para projéteis inimigos.
+            // TODO: Integrar dano no jogador para projéteis inimigos.
         }
     }
 }

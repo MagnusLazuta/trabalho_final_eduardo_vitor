@@ -7,7 +7,13 @@
         { "type": "baba", "position": [-4.95, 0.85, 1.25] },
         { "type": "baba", "position": [2.31, 0.85, 4.58] },
         { "type": "small spider", "position": [7.51, 11.11, -6.14] },
-        { "type": "small spider", "position": [3.03, 12.78, -9.14] }
+        { "type": "small spider", "position": [3.03, 12.78, -9.14] },
+        { "type": "scrub", "position": [15.47, 9.62, 15.29] },
+        { "type": "big spider", "position": [5.78, 18.5, 1.38] },
+        { "type": "baba", "position": [4.54, -18.78, 1.67] },
+        { "type": "small spider", "position": [-0.2, -14.62, -2.10] },
+        { "type": "small spider", "position": [-9.34, -19.11, 6.74] },
+        { "type": "scrub", "position": [20.93, -18.78, 1.47] }
       ]
     }
   ]

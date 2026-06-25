@@ -1372,15 +1372,9 @@ static bool RefreshLockOnTargetPosition(glm::vec4 &target_position)
 
     if (!QueryEnemyLockOnTargetPosition(g_LockOnTargetEnemyIndex, g_PlayerCubePosition, LOCK_ON_RADIUS, LOCK_ON_MAX_HEIGHT_DELTA, target_position))
     {
-        g_LockOnTargetEnemyIndex = QueryClosestLockOnEnemy(g_PlayerCubePosition, LOCK_ON_RADIUS, LOCK_ON_MAX_HEIGHT_DELTA);
-        if (!QueryEnemyLockOnTargetPosition(g_LockOnTargetEnemyIndex, g_PlayerCubePosition, LOCK_ON_RADIUS, LOCK_ON_MAX_HEIGHT_DELTA, target_position))
-        {
-            std::printf("[LOCK_ON] Target lost.\n");
-            EnterThirdPersonCamera();
-            return false;
-        }
-
-        std::printf("[LOCK_ON] Switched to enemy %d.\n", g_LockOnTargetEnemyIndex);
+        std::printf("[LOCK_ON] Target lost.\n");
+        EnterThirdPersonCamera();
+        return false;
     }
 
     return true;
@@ -2588,6 +2582,18 @@ static glm::vec4 ComputeFairyOffset(float orbit_progress, const FairyMotionParam
     return fairy_offset;
 }
 
+static glm::vec4 ComputeFairyOrbitCenter()
+{
+    if (g_CameraMode == CameraMode::LockOn)
+    {
+        glm::vec4 target_position;
+        if (QueryEnemyLockOnTargetPosition(g_LockOnTargetEnemyIndex, g_PlayerCubePosition, LOCK_ON_RADIUS, LOCK_ON_MAX_HEIGHT_DELTA, target_position))
+            return target_position + glm::vec4(0.0f, 0.35f, 0.0f, 0.0f);
+    }
+
+    return g_PlayerCubePosition + glm::vec4(0.0f, g_FairyMotionParams.head_height_offset, 0.0f, 0.0f);
+}
+
 void ComputeObjBounds(ObjModel *model, glm::vec4 &bbox_min, glm::vec4 &bbox_max)
 {
     bbox_min = glm::vec4(+std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), +std::numeric_limits<float>::infinity(), 1.0f);
@@ -3632,6 +3638,8 @@ int main()
         EnemyUpdateContext enemy_update_context;
         enemy_update_context.player_position = g_PlayerCubePosition;
         enemy_update_context.player_half_extents = g_PlayerCubeHalfExtents;
+        enemy_update_context.player_yaw = g_PlayerYaw;
+        enemy_update_context.player_defending = g_PlayerStateMachine.IsDefending();
         enemy_update_context.scenario_collision_shapes = &g_ScenarioCollisionShapes;
 
         UpdateEnemies(delta_time, enemy_update_context);
@@ -4440,9 +4448,9 @@ int main()
         DrawLockOnTargetIndicator();
 
         const float fairy_orbit_progress = std::fmod(static_cast<float>(current_frame_time) / g_FairyMotionParams.orbit_period_seconds, 1.0f);
-        const glm::vec4 fairy_head_center = g_PlayerCubePosition + glm::vec4(0.0f, g_FairyMotionParams.head_height_offset, 0.0f, 0.0f);
+        const glm::vec4 fairy_orbit_center = ComputeFairyOrbitCenter();
         const glm::vec4 fairy_offset = ComputeFairyOffset(fairy_orbit_progress, g_FairyMotionParams);
-        const glm::vec4 fairy_world_position = fairy_head_center + fairy_offset;
+        const glm::vec4 fairy_world_position = fairy_orbit_center + fairy_offset;
 
         const float pi = 3.141592f;
         const float vx = -fairy_offset.z;
@@ -4459,10 +4467,13 @@ int main()
         glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
         glUniform1i(g_cube_colliding_uniform, 0);
         glUniform3f(g_object_tint_uniform, 0.55f, 0.95f, 0.70f);
+
+        glDisable(GL_CULL_FACE);
         for (size_t i = 0; i < fairy_model_object_names.size(); ++i)
         {
             DrawVirtualObject(fairy_model_object_names[i].c_str());
         }
+        glEnable(GL_CULL_FACE);
 
         if (g_SlingshotProjectile.is_active)
         {
@@ -4589,8 +4600,9 @@ int main()
             // Navi vectors debug display (3D arrows)
             {
                 const float debug_navi_progress = std::fmod(static_cast<float>(current_frame_time) / g_FairyMotionParams.orbit_period_seconds, 1.0f);
+                const glm::vec4 debug_navi_center = ComputeFairyOrbitCenter();
                 const glm::vec4 debug_navi_offset = ComputeFairyOffset(debug_navi_progress, g_FairyMotionParams);
-                const glm::vec4 debug_navi_pos = g_PlayerCubePosition + glm::vec4(0.0f, g_FairyMotionParams.head_height_offset, 0.0f, 0.0f) + debug_navi_offset;
+                const glm::vec4 debug_navi_pos = debug_navi_center + debug_navi_offset;
 
                 const float debug_navi_w = debug_navi_progress - std::floor(debug_navi_progress);
                 const float debug_navi_vx = -debug_navi_offset.z;
