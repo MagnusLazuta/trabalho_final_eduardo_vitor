@@ -64,4 +64,15 @@ Agentes de IA foram bastante utilizados no desenvolvimento do trabalho, em espec
 * Skullwalltula (aranha da parede): Fica nas vinhas, subindo e descendo e bloqueando a passagem do jogador.
 * Skulltula (aranha grande): Bate no personagem corpo-a-corpo case ele se aproxime, mas fica parada por um tempo após atacar. Ela é invulnerável a dano pela frente, mas se o Link bloquear seu ataque, além de ficar atordoada ela se vira, expondo seu ponto fraco.
 * Deku Scrub (arbusto): Atira projéteis no jogador quando ele se aproxima. O jogador pode bloquear os projéteis com seu escudo para refletí-los.
+
 ## Compilação e Execução
+- 1. Baixar e compilar a biblioteca assimp usando executando 
+```bash
+./scripts/build_assimp.sh
+```
+
+- 2. Compilar o jogo todo e executar o jogo:
+```bash
+cmake --workflow --preset configure-build-run
+```
+
