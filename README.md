@@ -9,7 +9,6 @@
 - **Aluno 2 - Cartão UFRGS**: 344617
 
 ## Aplicação desenvolvida
-
 - **Título do trabalho**: Réplica do The Legend of Zelda Ocarina of Time (versão do nintendo 3DS)
 - **O que foi implementado**: A nossa implementação foi uma recriação das salas iniciais da seção "Inside the Great Deku Tree", do jogo The Legend of Zelda Ocarina of Time.
 ## Contribuições
@@ -66,7 +65,7 @@ Agentes de IA foram bastante utilizados no desenvolvimento do trabalho, em espec
 * Deku Scrub (arbusto): Atira projéteis no jogador quando ele se aproxima. O jogador pode bloquear os projéteis com seu escudo para refletí-los.
 
 ## Compilação e Execução
-- 1. Baixar e compilar a biblioteca assimp usando executando 
+- 1. Baixar e compilar a biblioteca assimp usando o comando abaixo:
 ```bash
 ./scripts/build_assimp.sh
 ```
