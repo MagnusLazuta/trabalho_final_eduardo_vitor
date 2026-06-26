@@ -249,6 +249,7 @@ struct SceneObjectInstance
 {
     std::string model_path;       // "shared/door.obj"
     std::string type;             // "DOOR"
+    std::string item;             // item que concede ao interagir (CHEST)
     glm::vec3 position;
     glm::vec3 rotation;           // graus
     glm::vec3 scale;
@@ -286,7 +287,6 @@ glm::vec4 g_ScenarioBoundsMax = glm::vec4(-std::numeric_limits<float>::infinity(
 
 glm::mat4 g_ScenarioModelMatrix = Matrix_Identity();
 const char *g_SceneMapPath = "../../assets/scenes/scene00/map.obj";
-const char *g_SceneCollisionPath = "../../assets/scenes/scene00/collision.obj";
 
 static const glm::vec4 g_HardcodedTestSpawnPosition(15.0f, 0.75f, -0.26f, 1.0f);
 static const char *g_EnemySpawnAreaId = "scene00_area01";
@@ -436,7 +436,21 @@ ModelAttachment *g_ShieldAttachment = nullptr;
 ModelAttachment *g_SlingshotAttachment = nullptr;
 std::vector<std::string> g_SlingshotObjectNames;
 bool g_SlingshotEquipped = false;
+bool g_SlingshotUnlocked = false;
 bool g_SlingshotTuningMode = false;
+glm::vec4 g_SlingshotModelCenter = glm::vec4(0.0f);
+float g_SlingshotModelScale = 1.0f;
+
+struct ChestItemAnim
+{
+    bool active = false;
+    glm::vec3 position;
+    float elapsed = 0.0f;
+    float duration = 2.0f;
+    float float_height = 2.5f;
+    std::string item;
+};
+ChestItemAnim g_ChestItemAnim;
 
 // Animações
 
@@ -1117,6 +1131,7 @@ std::vector<SceneObjectInstance> LoadSceneObjectInstances(int scene_idx)
         inst.scale = ExtractJSONVec3(entry, "scale");
         inst.interactive = ExtractJSONBool(entry, "interactive");
         inst.collision_type = ExtractJSONString(entry, "collision_type");
+        inst.item = ExtractJSONString(entry, "item");
 
         // Verifica se tem AABB pre-computada
         std::size_t aabb_pos = entry.find("\"aabb\"");
@@ -1572,6 +1587,11 @@ static void CycleLockOnTarget(int direction)
 
 static void ToggleSlingshotEquip()
 {
+    if (!g_SlingshotUnlocked)
+    {
+        std::printf("[TAB] Voce ainda nao tem o estilingue!\n");
+        return;
+    }
     g_SlingshotEquipped = !g_SlingshotEquipped;
     ResetSlingshotState();
 
@@ -2769,17 +2789,13 @@ int main()
         snprintf(buf, sizeof(buf), "assets/scenes/scene%02d/map.obj", scene_idx);
         snprintf(buf_bin, sizeof(buf_bin), "../../assets/scenes/scene%02d/map.obj", scene_idx);
         const std::string map_path = ResolveScene00Path(buf_bin, buf);
-        snprintf(buf, sizeof(buf), "assets/scenes/scene%02d/collision.obj", scene_idx);
-        snprintf(buf_bin, sizeof(buf_bin), "../../assets/scenes/scene%02d/collision.obj", scene_idx);
-        const std::string col_path = ResolveScene00Path(buf_bin, buf);
-
         printf("\n=== Carregando cena scene%02d ===\n", scene_idx);
 
         ScenePart part;
         snprintf(buf, sizeof(buf), "scene%02d", scene_idx);
         part.name = buf;
 
-        // --- Carrega mapa visual ---
+        // --- Carrega mapa (visual + colisao) ---
         ObjModel map_model(map_path.c_str());
         ComputeNormals(&map_model);
 
@@ -2802,12 +2818,29 @@ int main()
                 part.render_object_names.push_back(name);
         }
 
-        // --- Carrega colisao e usa AABB apenas do collision.obj ---
+        // --- Colisao a partir do proprio map.obj ---
+        // Filtra shapes que nao devem ter colisao (VISUAL, portas, baus, teias, ghost ladders — tratados por instancias)
         {
-            ObjModel col_model(col_path.c_str());
-            ComputeNormals(&col_model);
-            BuildCollisionDataIntoVector(&col_model, Matrix_Identity(),
+            // Salva todas as shapes e cria uma lista filtrada sem VISUAL/DOOR/CHEST/COBWEB_FLOORHOLE/GHOST_LADDER
+            std::vector<tinyobj::shape_t> all_shapes;
+            all_shapes.swap(map_model.shapes);
+
+            for (auto &shape : all_shapes)
+            {
+                if (shape.name.find("VISUAL") != std::string::npos ||
+                    shape.name.find("DOOR") != std::string::npos ||
+                    shape.name.find("CHEST") != std::string::npos ||
+                    shape.name.find("COBWEB_FLOORHOLE") != std::string::npos ||
+                    shape.name.find("GHOST_LADDER") != std::string::npos)
+                    continue;
+                map_model.shapes.push_back(shape);
+            }
+
+            BuildCollisionDataIntoVector(&map_model, Matrix_Identity(),
                 part.collision_shapes, part.bbox_min, part.bbox_max);
+
+            // Restaura todas as shapes para uso visual
+            all_shapes.swap(map_model.shapes);
         }
 
         printf("  Collision AABB: [%.1f,%.1f,%.1f] a [%.1f,%.1f,%.1f]\n",
@@ -2956,6 +2989,7 @@ int main()
                 chest.bbox_center = glm::vec4(instances[i].position.x, instances[i].position.y, instances[i].position.z, 1.0f);
                 chest.bbox_min = instances[i].aabb_min;
                 chest.bbox_max = instances[i].aabb_max;
+                chest.item = instances[i].item;
                 g_Chests.push_back(chest);
                 printf("  Bau encontrado: center=(%.1f,%.1f,%.1f)\n",
                        chest.bbox_center.x, chest.bbox_center.y, chest.bbox_center.z);
@@ -3248,6 +3282,13 @@ int main()
         ComputeNormals(&slingshot_model);
         BuildTrianglesAndAddToVirtualScene(&slingshot_model, g_DefaultGrayTextureID);
 
+        glm::vec4 slingshot_bbox_min, slingshot_bbox_max;
+        ComputeObjBounds(&slingshot_model, slingshot_bbox_min, slingshot_bbox_max);
+        g_SlingshotModelCenter = (slingshot_bbox_min + slingshot_bbox_max) * 0.5f;
+        glm::vec4 slingshot_size = slingshot_bbox_max - slingshot_bbox_min;
+        float max_dim = std::max(slingshot_size.x, std::max(slingshot_size.y, slingshot_size.z));
+        g_SlingshotModelScale = (max_dim > 1e-6f) ? (1.0f / max_dim) : 1.0f;
+
         for (auto &[name, obj] : g_VirtualScene)
         {
             if (names_before.find(name) == names_before.end())
@@ -3373,6 +3414,8 @@ int main()
         player_model_size.y * player_model_scale * 0.5f,
         player_model_size.z * player_model_scale * 0.5f,
         0.0f);
+
+    g_PlayerCubeHalfExtents *= 0.8f;
 
     // Mede stride length das animações e sincroniza velocidade de movimento
     printf("\n=== STRIDE LENGTH COMPUTATION ===\n");
@@ -3672,18 +3715,29 @@ int main()
             }
 
             // Detecta ENTER pressionado perto de um bau
+            CollisionAABB player_aabb = ComputeObbAabb(player_obb);
             for (size_t ci = 0; ci < g_Chests.size(); ++ci)
             {
                 if (g_Chests[ci].state != ChestState::CLOSED)
                     continue;
-                float dx = g_Chests[ci].bbox_center.x - g_PlayerCubePosition.x;
-                float dy = g_Chests[ci].bbox_center.y - g_PlayerCubePosition.y;
-                float dz = g_Chests[ci].bbox_center.z - g_PlayerCubePosition.z;
-                float dist_sq = dx * dx + dy * dy + dz * dz;
-                if (dist_sq < 4.0f)
+                CollisionAABB chest_aabb = {g_Chests[ci].bbox_min, g_Chests[ci].bbox_max};
+                if (!AabbAabbIntersect(player_aabb, chest_aabb))
+                    continue;
                 {
                     g_Chests[ci].state = ChestState::OPENING;
                     printf("Bau abrindo!\n");
+                    if (!g_SlingshotUnlocked && g_Chests[ci].item == "SLINGSHOT")
+                    {
+                        g_SlingshotUnlocked = true;
+                        printf("Voce encontrou o estilingue! Pressione TAB para equipa-lo.\n");
+                        g_ChestItemAnim.active = true;
+                        g_ChestItemAnim.position = glm::vec3(
+                            g_Chests[ci].bbox_center.x,
+                            g_Chests[ci].bbox_center.y + 1.5f,
+                            g_Chests[ci].bbox_center.z);
+                        g_ChestItemAnim.elapsed = 0.0f;
+                        g_ChestItemAnim.item = "SLINGSHOT";
+                    }
                     break;
                 }
             }
@@ -3779,6 +3833,23 @@ int main()
             }
         }
 
+
+        // Atualiza animacao do item saindo do bau
+        if (g_ChestItemAnim.active)
+        {
+            g_ChestItemAnim.elapsed += delta_time;
+            float t = g_ChestItemAnim.elapsed / g_ChestItemAnim.duration;
+            if (t >= 1.0f)
+            {
+                g_ChestItemAnim.active = false;
+                g_ChestItemAnim.item.clear();
+            }
+            else
+            {
+                float ease = 1.0f - (1.0f - t) * (1.0f - t);
+                g_ChestItemAnim.position.y = g_Chests[0].bbox_center.y + 1.5f + ease * g_ChestItemAnim.float_height;
+            }
+        }
 
         // Aqui executamos as operações de renderização
 
@@ -3891,7 +3962,7 @@ int main()
                 ? camera_view_vector / camera_view_length
                 : glm::vec4(0.0f, 0.0f, -1.0f, 0.0f);
 
-        if (g_SlingshotState.fire_requested && (g_FirstPersonCamera || g_SlingshotEquipped))
+        if (g_SlingshotState.fire_requested && g_SlingshotEquipped)
         {
             if (g_SlingshotEquipped && !g_FirstPersonCamera)
             {
@@ -4491,6 +4562,26 @@ int main()
         }
 
         DrawEnemyProjectiles(enemy_draw_context);
+
+        if (g_ChestItemAnim.active && g_ChestItemAnim.item == "SLINGSHOT")
+        {
+            float t = g_ChestItemAnim.elapsed / g_ChestItemAnim.duration;
+            float spin = t * 360.0f * 3.0f;
+            glm::mat4 model =
+                Matrix_Translate(g_ChestItemAnim.position.x, g_ChestItemAnim.position.y, g_ChestItemAnim.position.z) *
+                Matrix_Rotate_Y(glm::radians(spin)) *
+                Matrix_Scale(g_SlingshotModelScale * 1.2f, g_SlingshotModelScale * 1.2f, g_SlingshotModelScale * 1.2f) *
+                Matrix_Translate(-g_SlingshotModelCenter.x, -g_SlingshotModelCenter.y, -g_SlingshotModelCenter.z);
+
+            glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(model));
+            glUniform1i(g_object_id_uniform, OBJECT_ID_SCENARIO);
+            glUniform1i(g_cube_colliding_uniform, 0);
+            glUniform3f(g_object_tint_uniform, 1.0f, 0.9f, 0.2f);
+            for (const auto &name : g_SlingshotObjectNames)
+                DrawVirtualObject(name.c_str());
+            glUniform3f(g_object_tint_uniform, 1.0f, 1.0f, 1.0f);
+        }
+
         ParticleDrawContext particle_draw_context;
         particle_draw_context.model_uniform = g_model_uniform;
         particle_draw_context.object_id_uniform = g_object_id_uniform;
@@ -5806,6 +5897,21 @@ void BuildCollisionDataIntoVector(ObjModel *model, glm::mat4 model_matrix,
                 shape_collision.bbox_max.z = std::max(shape_collision.bbox_max.z, p.z);
             }
 
+            glm::vec4 e1 = world_triangle.v2 - world_triangle.v1;
+            glm::vec4 e2 = world_triangle.v3 - world_triangle.v1;
+            e1.w = 0.0f; e2.w = 0.0f;
+            glm::vec4 n = crossproduct(e1, e2);
+            float nl = std::sqrt(dotproduct(n, n));
+            if (nl > 1e-5f)
+            {
+                world_triangle.normal = n / nl;
+                world_triangle.normal.w = 0.0f;
+            }
+            else
+            {
+                world_triangle.normal = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
+            }
+
             shape_collision.triangles.push_back(world_triangle);
         }
 
@@ -6056,7 +6162,7 @@ void MouseButtonCallback(GLFWwindow *window, int button, int action, int mods)
             g_CameraTheta = std::atan2(-camera_view_vector.x, camera_view_vector.z);
         }
 
-        if (g_FirstPersonCamera || g_SlingshotEquipped)
+        if (g_SlingshotEquipped)
         {
             BeginSlingshotCharge();
         }
@@ -6067,7 +6173,7 @@ void MouseButtonCallback(GLFWwindow *window, int button, int action, int mods)
         // variável abaixo para false.
         g_LeftMouseButtonPressed = false;
 
-        if ((g_FirstPersonCamera || g_SlingshotEquipped) && g_SlingshotState.is_charging)
+        if (g_SlingshotEquipped && g_SlingshotState.is_charging)
         {
             QueueSlingshotShot();
         }

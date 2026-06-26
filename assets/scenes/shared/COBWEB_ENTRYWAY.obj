@@ -1,6 +1,6 @@
 # Blender 5.1.1
 # www.blender.org
-mtllib scene00.mtl
+mtllib COBWEB_ENTRYWAY.mtl
 o COBWEB_ENTRYWAY.001
 v 6.028702 -12.150563 3.050391
 v 6.132088 -12.124652 8.646015

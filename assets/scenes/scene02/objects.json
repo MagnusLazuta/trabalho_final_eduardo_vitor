@@ -3,6 +3,7 @@
     {
       "model": "chest.obj",
       "type": "CHEST",
+      "item": "SLINGSHOT",
       "position": [
         30.320063,
         11.219892,
