@@ -46,9 +46,12 @@ static const float BIG_SKULLTULA_VULNERABLE_DURATION = 1.6f;
 static const float BIG_SKULLTULA_BACK_VULNERABLE_DOT = -0.30f;
 static const float BIG_SKULLTULA_FRONT_PROTECTED_DOT = -0.05f;
 static const float BIG_SKULLTULA_CONTACT_RADIUS_BONUS = 0.22f;
-static const float BIG_SKULLTULA_ATTACK_TILT = 0.32f;
+static const float BIG_SKULLTULA_ATTACK_TILT = 0.52f;
+static const float BIG_SKULLTULA_ATTACK_HIT_START = 0.7f;
 static const float BIG_SKULLTULA_RECOVERY_TILT = -0.18f;
 static const float BIG_SKULLTULA_IDLE_TILT_SWAY = 0.05f;
+static const float BIG_SKULLTULA_BLOCK_STUN_DURATION = 1.6f;
+static const float BIG_SKULLTULA_BLOCK_TURN_DURATION = 0.45f;
 static const float GOHMA_LARVA_JUMP_DURATION = 0.7f;
 static const float QUEEN_GOHMA_STUN_DURATION = 4.0f;
 static const float ENEMY_DEATH_DURATION = 1.15f;
@@ -93,6 +96,12 @@ static float ComputeYawToTarget(const glm::vec4 &from, const glm::vec4 &to)
 {
     const glm::vec4 delta = to - from;
     return std::atan2(delta.x, delta.z);
+}
+
+static float InterpolateAngle(float start, float target, float t)
+{
+    const float delta = WrapAnglePi(target - start);
+    return WrapAnglePi(start + delta * t);
 }
 
 static std::string ResolveEnemySpawnScriptPath()
@@ -284,6 +293,11 @@ static Enemy MakeEnemy(
     enemy.animation_timer = 0.0f;
     enemy.timer_a = 0.0f;
     enemy.timer_b = 0.0f;
+    enemy.is_turning_after_block = false;
+    enemy.turn_start_yaw = 0.0f;
+    enemy.turn_target_yaw = 0.0f;
+    enemy.turn_timer = 0.0f;
+    enemy.turn_duration = 0.0f;
     enemy.active = true;
     enemy.dead = false;
     enemy.vulnerable = false;
@@ -479,6 +493,13 @@ static bool EnemyAabbIntersectsPointBox(const Enemy &enemy, const glm::vec4 &cen
         center + half_extents};
 
     return AabbAabbIntersect(enemy_box, other_box);
+}
+
+static bool IsBigSkulltulaHitFromBehind(const Enemy &enemy, const glm::vec4 &hit_position)
+{
+    const glm::vec4 enemy_forward = ForwardFromYaw(enemy.yaw);
+    const glm::vec4 to_hit = NormalizeXZ(hit_position - enemy.position);
+    return dotproduct(enemy_forward, to_hit) <= BIG_SKULLTULA_BACK_VULNERABLE_DOT;
 }
 
 static bool BoxesIntersect(
@@ -1141,6 +1162,36 @@ static void UpdateSkullwalltula(Enemy &enemy, float delta_time, const EnemyUpdat
     }
 }
 
+static void BeginBigSkulltulaBlockedAttack(Enemy &enemy, const EnemyUpdateContext &context)
+{
+    enemy.state = EnemyState::Stunned;
+    enemy.state_timer = 0.0f;
+    enemy.attack_cooldown_timer = enemy.attack_cooldown;
+    enemy.vulnerable = true;
+    enemy.is_turning_after_block = true;
+    enemy.turn_start_yaw = WrapAnglePi(enemy.yaw);
+    enemy.turn_target_yaw = WrapAnglePi(ComputeYawToTarget(enemy.position, context.player_position) + PI);
+    enemy.turn_timer = 0.0f;
+    enemy.turn_duration = BIG_SKULLTULA_BLOCK_TURN_DURATION;
+}
+
+static void UpdateBigSkulltulaBlockedTurn(Enemy &enemy, float delta_time)
+{
+    if (!enemy.is_turning_after_block)
+        return;
+
+    enemy.turn_timer += delta_time;
+    const float t = Clamp01(enemy.turn_timer / std::max(0.001f, enemy.turn_duration));
+    const float smooth_t = t * t * (3.0f - 2.0f * t);
+    enemy.yaw = InterpolateAngle(enemy.turn_start_yaw, enemy.turn_target_yaw, smooth_t);
+
+    if (t >= 1.0f)
+    {
+        enemy.yaw = enemy.turn_target_yaw;
+        enemy.is_turning_after_block = false;
+    }
+}
+
 static void UpdateBigSkulltula(Enemy &enemy, float delta_time, const EnemyUpdateContext &context)
 {
     const glm::vec4 raw_to_player = context.player_position - enemy.position;
@@ -1190,6 +1241,20 @@ static void UpdateBigSkulltula(Enemy &enemy, float delta_time, const EnemyUpdate
         }
         break;
 
+    case EnemyState::Stunned:
+        enemy.vulnerable = true;
+        enemy.pitch = BIG_SKULLTULA_RECOVERY_TILT;
+        UpdateBigSkulltulaBlockedTurn(enemy, delta_time);
+        if (enemy.state_timer >= BIG_SKULLTULA_BLOCK_STUN_DURATION)
+        {
+            if (enemy.is_turning_after_block)
+                enemy.yaw = enemy.turn_target_yaw;
+            enemy.state = EnemyState::Vulnerable;
+            enemy.state_timer = 0.0f;
+            enemy.is_turning_after_block = false;
+        }
+        break;
+
     case EnemyState::Attacking:
     {
         const float attack_progress = Clamp01(enemy.state_timer / BIG_SKULLTULA_ATTACK_DURATION);
@@ -1210,11 +1275,20 @@ static void UpdateBigSkulltula(Enemy &enemy, float delta_time, const EnemyUpdate
             enemy.state_timer = 0.0f;
         }
 
-        if (EnemyAabbIntersectsPointBox(
+        if (attack_progress >= BIG_SKULLTULA_ATTACK_HIT_START &&
+            EnemyAabbIntersectsPointBox(
                 enemy,
                 context.player_position,
                 context.player_half_extents + glm::vec4(BIG_SKULLTULA_CONTACT_RADIUS_BONUS)))
+        {
+            if (context.player_defending)
+            {
+                BeginBigSkulltulaBlockedAttack(enemy, context);
+                break;
+            }
+
             LogPlayerHitByEnemy("Big Skulltula");
+        }
         // TODO: Aplicar dano no contato da investida/giro quando houver vida do jogador.
         break;
     }
@@ -1672,7 +1746,13 @@ int QueryEnemyHitByPlayerProjectile(const glm::vec4 &projectile_position, float 
             continue;
 
         if (EnemyAabbIntersectsPointBox(enemy, projectile_position, projectile_half_extents))
+        {
+            if (enemy.type == EnemyType::BIG_SKULLTULA &&
+                !IsBigSkulltulaHitFromBehind(enemy, projectile_position))
+                continue;
+
             return static_cast<int>(i);
+        }
     }
 
     return -1;
@@ -1800,7 +1880,7 @@ static bool ObbAabbIntersect(
     return BoxesIntersect(local_center, local_half, glm::vec4(0.0f), obb.half_extents);
 }
 
-int QuerySwordHitEnemy(const CollisionOBB &sword_obb)
+int QuerySwordHitEnemy(const CollisionOBB &sword_obb, const glm::vec4 &attacker_position)
 {
     for (std::size_t i = 0; i < g_Enemies.size(); ++i)
     {
@@ -1809,7 +1889,13 @@ int QuerySwordHitEnemy(const CollisionOBB &sword_obb)
             continue;
 
         if (ObbAabbIntersect(sword_obb, enemy.position, enemy.collision_half_extents))
+        {
+            if (enemy.type == EnemyType::BIG_SKULLTULA &&
+                !IsBigSkulltulaHitFromBehind(enemy, attacker_position))
+                continue;
+
             return static_cast<int>(i);
+        }
     }
 
     return -1;

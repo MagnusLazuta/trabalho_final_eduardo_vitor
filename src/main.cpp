@@ -1963,7 +1963,7 @@ static void CheckSwordEnemyCollisions(float delta_time)
 
     g_SwordAttackHitActive = true;
 
-    const int hit_index = QuerySwordHitEnemy(g_SwordHitbox);
+    const int hit_index = QuerySwordHitEnemy(g_SwordHitbox, g_PlayerCubePosition);
     if (hit_index >= 0)
     {
         if (hit_index < (int)g_SwordHitEnemies.size() && !g_SwordHitEnemies[hit_index])
