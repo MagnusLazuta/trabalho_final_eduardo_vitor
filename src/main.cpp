@@ -5897,6 +5897,21 @@ void BuildCollisionDataIntoVector(ObjModel *model, glm::mat4 model_matrix,
                 shape_collision.bbox_max.z = std::max(shape_collision.bbox_max.z, p.z);
             }
 
+            glm::vec4 e1 = world_triangle.v2 - world_triangle.v1;
+            glm::vec4 e2 = world_triangle.v3 - world_triangle.v1;
+            e1.w = 0.0f; e2.w = 0.0f;
+            glm::vec4 n = crossproduct(e1, e2);
+            float nl = std::sqrt(dotproduct(n, n));
+            if (nl > 1e-5f)
+            {
+                world_triangle.normal = n / nl;
+                world_triangle.normal.w = 0.0f;
+            }
+            else
+            {
+                world_triangle.normal = glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
+            }
+
             shape_collision.triangles.push_back(world_triangle);
         }
 

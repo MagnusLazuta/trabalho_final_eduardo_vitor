@@ -7,6 +7,7 @@ struct Triangle
     glm::vec4 v1;
     glm::vec4 v2;
     glm::vec4 v3;
+    glm::vec4 normal;
 };
 
 

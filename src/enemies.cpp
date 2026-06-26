@@ -589,8 +589,7 @@ static void MoveSkullwalltulaVertically(Enemy &enemy, float delta_time, const En
 
     CollisionRay ray_down = {enemy.position, glm::vec4(0.0f, -1.0f, 0.0f, 0.0f)};
     CollisionRay ray_up = {enemy.position, glm::vec4(0.0f, 1.0f, 0.0f, 0.0f)};
-    float floor_distance = 0.0f;
-    float ceiling_distance = 0.0f;
+    const float max_ray_dist = SKULLWALLTULA_VERTICAL_RANGE;
 
     for (std::size_t shape_index = 0; shape_index < context.scenario_collision_shapes->size(); ++shape_index)
     {
@@ -598,29 +597,26 @@ static void MoveSkullwalltulaVertically(Enemy &enemy, float delta_time, const En
         if (!IsBlockingScenarioCollision(shape.type))
             continue;
 
+        CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
+        float aabb_t;
+        bool hit_down_aabb = RayAabbIntersect(ray_down, shape_aabb, aabb_t);
+        bool hit_up_aabb = RayAabbIntersect(ray_up, shape_aabb, aabb_t);
+        if (!hit_down_aabb && !hit_up_aabb)
+            continue;
+
         for (std::size_t triangle_index = 0; triangle_index < shape.triangles.size(); ++triangle_index)
         {
             const Triangle &triangle = shape.triangles[triangle_index];
-            glm::vec4 edge_a = triangle.v2 - triangle.v1;
-            glm::vec4 edge_b = triangle.v3 - triangle.v1;
-            edge_a.w = 0.0f;
-            edge_b.w = 0.0f;
 
-            glm::vec4 normal = crossproduct(edge_a, edge_b);
-            normal.w = 0.0f;
-            const float normal_length = norm(normal);
-            if (normal_length <= 1e-5f)
-                continue;
-
-            normal = normal / normal_length;
-            if (std::fabs(normal.y) < 0.55f)
+            if (std::fabs(triangle.normal.y) < 0.55f)
                 continue;
 
             CollisionTriangle collision_triangle = {triangle.v1, triangle.v2, triangle.v3};
-            if (RayTriangleIntersect(ray_down, collision_triangle, floor_distance))
-                min_y = std::max(min_y, enemy.position.y - floor_distance + enemy.collision_half_extents.y);
-            if (RayTriangleIntersect(ray_up, collision_triangle, ceiling_distance))
-                max_y = std::min(max_y, enemy.position.y + ceiling_distance - enemy.collision_half_extents.y);
+            float hit_distance;
+            if (hit_down_aabb && RayTriangleIntersect(ray_down, collision_triangle, hit_distance) && hit_distance <= max_ray_dist)
+                min_y = std::max(min_y, enemy.position.y - hit_distance + enemy.collision_half_extents.y);
+            if (hit_up_aabb && RayTriangleIntersect(ray_up, collision_triangle, hit_distance) && hit_distance <= max_ray_dist)
+                max_y = std::min(max_y, enemy.position.y + hit_distance - enemy.collision_half_extents.y);
         }
     }
 
@@ -644,6 +640,11 @@ static void MoveSkullwalltulaVertically(Enemy &enemy, float delta_time, const En
 
 static void AlignSkullwalltulaToNearbyWall(Enemy &enemy, const EnemyUpdateContext &context)
 {
+    static int align_frame_counter = 0;
+    align_frame_counter++;
+    if (align_frame_counter % 2 != 0)
+        return;
+
     if (!context.scenario_collision_shapes)
         return;
 
@@ -671,22 +672,16 @@ static void AlignSkullwalltulaToNearbyWall(Enemy &enemy, const EnemyUpdateContex
             if (!IsBlockingScenarioCollision(shape.type))
                 continue;
 
+            CollisionAABB shape_aabb = {shape.bbox_min, shape.bbox_max};
+            float aabb_t;
+            if (!RayAabbIntersect(ray, shape_aabb, aabb_t))
+                continue;
+
             for (std::size_t triangle_index = 0; triangle_index < shape.triangles.size(); ++triangle_index)
             {
                 const Triangle &triangle = shape.triangles[triangle_index];
-                glm::vec4 edge_a = triangle.v2 - triangle.v1;
-                glm::vec4 edge_b = triangle.v3 - triangle.v1;
-                edge_a.w = 0.0f;
-                edge_b.w = 0.0f;
 
-                glm::vec4 normal = crossproduct(edge_a, edge_b);
-                normal.w = 0.0f;
-                const float normal_length = norm(normal);
-                if (normal_length <= 1e-5f)
-                    continue;
-
-                normal = normal / normal_length;
-                if (std::fabs(normal.y) > 0.45f)
+                if (std::fabs(triangle.normal.y) > 0.45f)
                     continue;
 
                 float hit_distance = 0.0f;
@@ -694,12 +689,12 @@ static void AlignSkullwalltulaToNearbyWall(Enemy &enemy, const EnemyUpdateContex
                 if (!RayTriangleIntersect(ray, collision_triangle, hit_distance))
                     continue;
 
-                if (hit_distance <= closest_distance)
-                {
-                    closest_distance = hit_distance;
-                    closest_direction = probe_directions[direction_index];
-                    found_wall = true;
-                }
+                if (hit_distance > closest_distance)
+                    continue;
+
+                closest_distance = hit_distance;
+                closest_direction = probe_directions[direction_index];
+                found_wall = true;
             }
         }
     }
