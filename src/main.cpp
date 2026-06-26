@@ -3415,6 +3415,8 @@ int main()
         player_model_size.z * player_model_scale * 0.5f,
         0.0f);
 
+    g_PlayerCubeHalfExtents *= 0.8f;
+
     // Mede stride length das animações e sincroniza velocidade de movimento
     printf("\n=== STRIDE LENGTH COMPUTATION ===\n");
     {
@@ -3960,7 +3962,7 @@ int main()
                 ? camera_view_vector / camera_view_length
                 : glm::vec4(0.0f, 0.0f, -1.0f, 0.0f);
 
-        if (g_SlingshotState.fire_requested && (g_FirstPersonCamera || g_SlingshotEquipped))
+        if (g_SlingshotState.fire_requested && g_SlingshotEquipped)
         {
             if (g_SlingshotEquipped && !g_FirstPersonCamera)
             {
@@ -6145,7 +6147,7 @@ void MouseButtonCallback(GLFWwindow *window, int button, int action, int mods)
             g_CameraTheta = std::atan2(-camera_view_vector.x, camera_view_vector.z);
         }
 
-        if (g_FirstPersonCamera || g_SlingshotEquipped)
+        if (g_SlingshotEquipped)
         {
             BeginSlingshotCharge();
         }
@@ -6156,7 +6158,7 @@ void MouseButtonCallback(GLFWwindow *window, int button, int action, int mods)
         // variável abaixo para false.
         g_LeftMouseButtonPressed = false;
 
-        if ((g_FirstPersonCamera || g_SlingshotEquipped) && g_SlingshotState.is_charging)
+        if (g_SlingshotEquipped && g_SlingshotState.is_charging)
         {
             QueueSlingshotShot();
         }
