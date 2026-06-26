@@ -287,7 +287,6 @@ glm::vec4 g_ScenarioBoundsMax = glm::vec4(-std::numeric_limits<float>::infinity(
 
 glm::mat4 g_ScenarioModelMatrix = Matrix_Identity();
 const char *g_SceneMapPath = "../../assets/scenes/scene00/map.obj";
-const char *g_SceneCollisionPath = "../../assets/scenes/scene00/collision.obj";
 
 static const glm::vec4 g_HardcodedTestSpawnPosition(15.0f, 0.75f, -0.26f, 1.0f);
 static const char *g_EnemySpawnAreaId = "scene00_area01";
@@ -2790,17 +2789,13 @@ int main()
         snprintf(buf, sizeof(buf), "assets/scenes/scene%02d/map.obj", scene_idx);
         snprintf(buf_bin, sizeof(buf_bin), "../../assets/scenes/scene%02d/map.obj", scene_idx);
         const std::string map_path = ResolveScene00Path(buf_bin, buf);
-        snprintf(buf, sizeof(buf), "assets/scenes/scene%02d/collision.obj", scene_idx);
-        snprintf(buf_bin, sizeof(buf_bin), "../../assets/scenes/scene%02d/collision.obj", scene_idx);
-        const std::string col_path = ResolveScene00Path(buf_bin, buf);
-
         printf("\n=== Carregando cena scene%02d ===\n", scene_idx);
 
         ScenePart part;
         snprintf(buf, sizeof(buf), "scene%02d", scene_idx);
         part.name = buf;
 
-        // --- Carrega mapa visual ---
+        // --- Carrega mapa (visual + colisao) ---
         ObjModel map_model(map_path.c_str());
         ComputeNormals(&map_model);
 
@@ -2823,12 +2818,29 @@ int main()
                 part.render_object_names.push_back(name);
         }
 
-        // --- Carrega colisao e usa AABB apenas do collision.obj ---
+        // --- Colisao a partir do proprio map.obj ---
+        // Filtra shapes que nao devem ter colisao (VISUAL, portas, baus, teias, ghost ladders — tratados por instancias)
         {
-            ObjModel col_model(col_path.c_str());
-            ComputeNormals(&col_model);
-            BuildCollisionDataIntoVector(&col_model, Matrix_Identity(),
+            // Salva todas as shapes e cria uma lista filtrada sem VISUAL/DOOR/CHEST/COBWEB_FLOORHOLE/GHOST_LADDER
+            std::vector<tinyobj::shape_t> all_shapes;
+            all_shapes.swap(map_model.shapes);
+
+            for (auto &shape : all_shapes)
+            {
+                if (shape.name.find("VISUAL") != std::string::npos ||
+                    shape.name.find("DOOR") != std::string::npos ||
+                    shape.name.find("CHEST") != std::string::npos ||
+                    shape.name.find("COBWEB_FLOORHOLE") != std::string::npos ||
+                    shape.name.find("GHOST_LADDER") != std::string::npos)
+                    continue;
+                map_model.shapes.push_back(shape);
+            }
+
+            BuildCollisionDataIntoVector(&map_model, Matrix_Identity(),
                 part.collision_shapes, part.bbox_min, part.bbox_max);
+
+            // Restaura todas as shapes para uso visual
+            all_shapes.swap(map_model.shapes);
         }
 
         printf("  Collision AABB: [%.1f,%.1f,%.1f] a [%.1f,%.1f,%.1f]\n",
