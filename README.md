@@ -30,7 +30,7 @@
 - Camera Lock-on
 
 ## Uso de IA
-	Agentes de IA foram bastante utilizados no desenvolvimento do trabalho, em especial Codex, Claude code. Para várias das funcionalidades eles foram usados como um criador de código inicial, a partir do qual refinamos os resultados manualmente ou com prompts adicionais, visto que as ferramentas muitas vezes não dão resultados adequados imediatamente. 
+Agentes de IA foram bastante utilizados no desenvolvimento do trabalho, em especial Codex, Claude code. Para várias das funcionalidades eles foram usados como um criador de código inicial, a partir do qual refinamos os resultados manualmente ou com prompts adicionais, visto que as ferramentas muitas vezes não dão resultados adequados imediatamente. 
 ## Imagens de Ilustração
 
 ## Manual
