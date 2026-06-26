@@ -38,11 +38,13 @@ static const float SKULLWALLTULA_WALL_PROBE_DISTANCE = 2.5f;
 static const float BIG_SKULLTULA_SCALE = 2.8f;
 static const float BIG_SKULLTULA_TURN_SPEED = 2.4f;
 static const float BIG_SKULLTULA_ATTACK_RADIUS = 2.0f;
-static const float BIG_SKULLTULA_ATTACK_SPEED = 1.9f;
+static const float BIG_SKULLTULA_ATTACK_SPEED = 0.45f;
 static const float BIG_SKULLTULA_ATTACK_DURATION = 0.85f;
 static const float BIG_SKULLTULA_COOLDOWN = 2.5f;
 static const float BIG_SKULLTULA_RECOVERY_DURATION = 0.55f;
 static const float BIG_SKULLTULA_VULNERABLE_DURATION = 1.6f;
+static const float BIG_SKULLTULA_DETECTION_HEIGHT = 1.25f;
+static const float BIG_SKULLTULA_SPAWN_LEASH_RADIUS = 1.0f;
 static const float BIG_SKULLTULA_BACK_VULNERABLE_DOT = -0.30f;
 static const float BIG_SKULLTULA_FRONT_PROTECTED_DOT = -0.05f;
 static const float BIG_SKULLTULA_CONTACT_RADIUS_BONUS = 0.22f;
@@ -1192,6 +1194,34 @@ static void UpdateBigSkulltulaBlockedTurn(Enemy &enemy, float delta_time)
     }
 }
 
+static void MoveBigSkulltulaWithinSpawnLeash(Enemy &enemy, const glm::vec4 &movement, const EnemyUpdateContext &context)
+{
+    glm::vec4 allowed_movement = movement;
+    const glm::vec4 desired_offset = (enemy.position + movement) - enemy.spawn_position;
+    const float desired_distance = LengthXZ(desired_offset);
+
+    if (desired_distance > BIG_SKULLTULA_SPAWN_LEASH_RADIUS)
+    {
+        const glm::vec4 current_offset = enemy.position - enemy.spawn_position;
+        const float current_distance = LengthXZ(current_offset);
+        if (current_distance >= BIG_SKULLTULA_SPAWN_LEASH_RADIUS)
+            return;
+
+        const float movement_length = LengthXZ(movement);
+        if (movement_length <= 1e-5f)
+            return;
+
+        allowed_movement = movement * ((BIG_SKULLTULA_SPAWN_LEASH_RADIUS - current_distance) / movement_length);
+    }
+
+    MoveEnemyWithScenarioCollision(
+        enemy,
+        allowed_movement,
+        *context.scenario_collision_shapes,
+        context.player_position,
+        context.player_half_extents);
+}
+
 static void UpdateBigSkulltula(Enemy &enemy, float delta_time, const EnemyUpdateContext &context)
 {
     const glm::vec4 raw_to_player = context.player_position - enemy.position;
@@ -1200,6 +1230,7 @@ static void UpdateBigSkulltula(Enemy &enemy, float delta_time, const EnemyUpdate
     const float front_dot = dotproduct(enemy_forward, to_player);
     const float distance_to_player = DistanceXZ(enemy.position, context.player_position);
     const float target_yaw = ComputeYawToTarget(enemy.position, context.player_position);
+    const bool player_in_detection_height = std::fabs(raw_to_player.y) <= BIG_SKULLTULA_DETECTION_HEIGHT;
 
     enemy.vulnerable = false;
     enemy.pitch = BIG_SKULLTULA_IDLE_TILT_SWAY * std::sin(enemy.animation_timer * 1.8f);
@@ -1209,6 +1240,9 @@ static void UpdateBigSkulltula(Enemy &enemy, float delta_time, const EnemyUpdate
     case EnemyState::Turning:
     case EnemyState::Idle:
         enemy.state = EnemyState::Turning;
+        if (!player_in_detection_height)
+            break;
+
         enemy.yaw = SmoothFollowAngle(enemy.yaw, target_yaw, BIG_SKULLTULA_TURN_SPEED, delta_time);
         if (distance_to_player <= BIG_SKULLTULA_ATTACK_RADIUS && enemy.attack_cooldown_timer <= 0.0f)
         {
@@ -1259,14 +1293,12 @@ static void UpdateBigSkulltula(Enemy &enemy, float delta_time, const EnemyUpdate
     {
         const float attack_progress = Clamp01(enemy.state_timer / BIG_SKULLTULA_ATTACK_DURATION);
         enemy.pitch = BIG_SKULLTULA_ATTACK_TILT * std::sin(attack_progress * PI);
-        enemy.yaw = SmoothFollowAngle(enemy.yaw, target_yaw, BIG_SKULLTULA_TURN_SPEED * 1.35f, delta_time);
-        const glm::vec4 dash = ForwardFromYaw(enemy.yaw) * (BIG_SKULLTULA_ATTACK_SPEED * delta_time);
-        MoveEnemyWithScenarioCollision(
-            enemy,
-            dash,
-            *context.scenario_collision_shapes,
-            context.player_position,
-            context.player_half_extents);
+        if (player_in_detection_height)
+        {
+            enemy.yaw = SmoothFollowAngle(enemy.yaw, target_yaw, BIG_SKULLTULA_TURN_SPEED * 1.35f, delta_time);
+            const glm::vec4 dash = ForwardFromYaw(enemy.yaw) * (BIG_SKULLTULA_ATTACK_SPEED * delta_time);
+            MoveBigSkulltulaWithinSpawnLeash(enemy, dash, context);
+        }
 
         if (enemy.state_timer >= BIG_SKULLTULA_ATTACK_DURATION)
         {
@@ -1275,7 +1307,8 @@ static void UpdateBigSkulltula(Enemy &enemy, float delta_time, const EnemyUpdate
             enemy.state_timer = 0.0f;
         }
 
-        if (attack_progress >= BIG_SKULLTULA_ATTACK_HIT_START &&
+        if (player_in_detection_height &&
+            attack_progress >= BIG_SKULLTULA_ATTACK_HIT_START &&
             EnemyAabbIntersectsPointBox(
                 enemy,
                 context.player_position,
