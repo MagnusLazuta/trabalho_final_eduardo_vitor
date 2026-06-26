@@ -89,6 +89,7 @@ struct ChestInstance
     float target_angle = 100.0f;
     float open_timer = 0.0f;
     float speed = 3.0f;
+    std::string item;
     glm::vec4 bbox_center = glm::vec4(0.0f);
     glm::vec4 bbox_min = glm::vec4(0.0f);
     glm::vec4 bbox_max = glm::vec4(0.0f);
