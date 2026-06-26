@@ -264,8 +264,6 @@ struct SceneObjectInstance
 static std::map<std::string, ObjModel*> g_ObjModelCache;
 // Instâncias de objetos por cena
 static std::map<int, std::vector<SceneObjectInstance>> g_SceneObjectInstances;
-// Textura padrão para objetos do JSON
-static GLuint g_DefaultObjectTextureID = 0;
 
 // Funções para carregar/salvar objects.json
 std::vector<SceneObjectInstance> LoadSceneObjectInstances(int scene_idx);
@@ -477,23 +475,19 @@ static float ComputeStrideLength(AssimpModelLoader &loader, int animIdx,
                                  float modelScale, const char *animLabel)
 {
     if (animIdx < 0 || animIdx >= (int)loader.GetAnimations().size()) {
-        printf("[STRIDE] %s: invalid animIdx=%d, skipping\n", animLabel, animIdx);
         return 0.0f;
     }
 
     float cycleSec = loader.GetAnimationDurationSeconds(animIdx);
     if (cycleSec <= 0.0f) {
-        printf("[STRIDE] %s: duration=%.4f, skipping\n", animLabel, cycleSec);
         return 0.0f;
     }
 
     const char *hipsBone = "mixamorig:Hips";
     if (!loader.HasBone(hipsBone)) {
-        printf("[STRIDE] %s: no Hips bone, skipping\n", animLabel);
         return 0.0f;
     }
 
-    // Amostra deslocamento do Hips (root motion) ao longo de 1 ciclo
     const int numSamples = 100;
     float minZ = 1e10f, maxZ = -1e10f;
     float minX = 1e10f, maxX = -1e10f;
@@ -512,7 +506,6 @@ static float ComputeStrideLength(AssimpModelLoader &loader, int animIdx,
     float strideZ = maxZ - minZ;
     float strideModel = sqrtf(strideX * strideX + strideZ * strideZ);
 
-    // Se Hips quase não se desloca (in-place), mede pelo pé como fallback
     if (strideModel < 0.01f) {
         const char *footBone = "mixamorig:LeftFoot";
         if (!loader.HasBone(footBone))
@@ -532,26 +525,11 @@ static float ComputeStrideLength(AssimpModelLoader &loader, int animIdx,
             strideZ = maxZ - minZ;
             strideModel = sqrtf(strideX * strideX + strideZ * strideZ);
             hipsBone = footBone;
-            printf("[STRIDE] %s (in-place, using %s instead of Hips)\n", animLabel, footBone);
         }
     }
 
     float strideWorld = strideModel * modelScale;
     float speed = strideWorld / cycleSec;
-
-    printf("[STRIDE] %s animIdx=%d bone='%s' cycleDur=%.4fs\n",
-           animLabel, animIdx, hipsBone, cycleSec);
-    printf("[STRIDE] %s modelStride=%.4f (X=%.4f Z=%.4f) worldStride=%.4f speed=%.4f u/s\n",
-           animLabel, strideModel, strideX, strideZ, strideWorld, speed);
-
-    printf("[STRIDE] %s %sZ samples (every 10%%):", animLabel, hipsBone);
-    for (int s = 0; s < numSamples; s += 10) {
-        float t = ((float)s / (float)(numSamples - 1)) * cycleSec;
-        loader.SampleBoneHierarchy(animIdx, t);
-        glm::vec3 pos = loader.GetLastSampledBonePos(hipsBone);
-        printf(" %.1f", pos.z);
-    }
-    printf("\n");
 
     return speed;
 }
@@ -988,7 +966,6 @@ static void LoadGhostLadderConfig()
     std::ifstream file(config_path);
     if (!file.is_open())
     {
-        printf("[GHOST LADDER CONFIG] No config file found at %s\n", config_path.c_str());
         return;
     }
 
@@ -1000,13 +977,11 @@ static void LoadGhostLadderConfig()
     std::size_t array_start = json_text.find("\"ghost_ladders\"");
     if (array_start == std::string::npos)
     {
-        printf("[GHOST LADDER CONFIG] No 'ghost_ladders' key found\n");
         return;
     }
     array_start = json_text.find('[', array_start);
     if (array_start == std::string::npos)
     {
-        printf("[GHOST LADDER CONFIG] No array found for 'ghost_ladders'\n");
         return;
     }
     std::size_t array_end = FindMatchingJSONDelimiter(json_text, array_start, '[', ']');
@@ -1045,15 +1020,11 @@ static void LoadGhostLadderConfig()
                 gl.final_y_offset = entry_final_y;
                 matched = true;
                 match_count++;
-                printf("[GHOST LADDER CONFIG] scene%02d center=(%.1f,%.1f,%.1f) -> final_y_offset=%.2f\n",
-                       entry_scene, entry_pos_vec.x, entry_pos_vec.y, entry_pos_vec.z, entry_final_y);
                 break;
             }
         }
         if (!matched)
         {
-            printf("[GHOST LADDER CONFIG] WARNING: No ghost ladder matched for scene%02d position=(%.1f,%.1f,%.1f)\n",
-                   entry_scene, entry_pos_vec.x, entry_pos_vec.y, entry_pos_vec.z);
         }
 
         entry_pos = brace_end + 1;
@@ -1064,13 +1035,9 @@ static void LoadGhostLadderConfig()
         auto &gl = g_GhostLadders[i];
         if (gl.final_y_offset == 0.0f)
         {
-            printf("[GHOST LADDER CONFIG] Ghost ladder %zu (scene%02d center=(%.1f,%.1f,%.1f)) has no final_y_offset in config. Starting GROUNDED at original position.\n",
-                   i, gl.scene_part_index, gl.bbox_center.x, gl.bbox_center.y, gl.bbox_center.z);
             gl.state = GhostLadderState::GROUNDED;
         }
     }
-    printf("[GHOST LADDER CONFIG] Loaded: %d matches for %zu ghost ladders\n",
-           match_count, g_GhostLadders.size());
 }
 
 // Carrega instâncias de objetos de objects.json para uma cena
@@ -1086,7 +1053,6 @@ std::vector<SceneObjectInstance> LoadSceneObjectInstances(int scene_idx)
     const std::string json_text = LoadTextFileContent(json_path);
     if (json_text.empty())
     {
-        printf("[JSON] objects.json para scene%02d vazio ou nao encontrado\n", scene_idx);
         return instances;
     }
 
@@ -1094,7 +1060,6 @@ std::vector<SceneObjectInstance> LoadSceneObjectInstances(int scene_idx)
     std::size_t objects_key_pos = json_text.find("\"objects\"");
     if (objects_key_pos == std::string::npos)
     {
-        printf("[JSON] Campo 'objects' nao encontrado em scene%02d\n", scene_idx);
         return instances;
     }
 
@@ -1102,7 +1067,6 @@ std::vector<SceneObjectInstance> LoadSceneObjectInstances(int scene_idx)
     std::size_t array_end = FindMatchingJSONDelimiter(json_text, array_start, '[', ']');
     if (array_start == std::string::npos || array_end == std::string::npos)
     {
-        printf("[JSON] Array 'objects' invalido em scene%02d\n", scene_idx);
         return instances;
     }
 
@@ -1153,7 +1117,6 @@ std::vector<SceneObjectInstance> LoadSceneObjectInstances(int scene_idx)
         entry_pos = brace_end + 1;
     }
 
-    printf("[JSON] Carregados %d objetos de objects.json para scene%02d\n", object_count, scene_idx);
     return instances;
 }
 
@@ -1202,7 +1165,6 @@ void SaveAabbToSceneJSON(int scene_idx, int object_index,
     out_file << "  ]\n}\n";
 
     out_file.close();
-    printf("[JSON] AABB salva em objects.json para scene%02d, objeto %d\n", scene_idx, object_index);
 }
 
 // Carrega um .obj do cache ou do disco
@@ -1218,7 +1180,6 @@ ObjModel* LoadOrGetCachedObjModel(const std::string& model_name)
     snprintf(buf, sizeof(buf), "assets/scenes/shared/%s", model_name.c_str());
     const std::string obj_path = ResolveScene00Path(buf_bin, buf);
 
-    printf("[JSON] Carregando modelo compartilhado: %s\n", obj_path.c_str());
     ObjModel* model = new ObjModel(obj_path.c_str());
     ComputeNormals(model);
     g_ObjModelCache[model_name] = model;
@@ -1283,8 +1244,6 @@ void AutoComputeAABB(SceneObjectInstance& inst)
     inst.aabb_max = bbox_max;
     inst.has_aabb = true;
 
-    printf("[JSON] AABB auto-computada: min=(%.2f, %.2f, %.2f) max=(%.2f, %.2f, %.2f)\n",
-           bbox_min.x, bbox_min.y, bbox_min.z, bbox_max.x, bbox_max.y, bbox_max.z);
 }
 
 // Constrói CollisionShape a partir de uma instância
@@ -1842,7 +1801,6 @@ static void UpdateSlingshotProjectile(float delta_time)
             hit_result.object_index >= 0 && hit_result.object_index < (int)g_GhostLadders.size())
         {
             g_GhostLadders[hit_result.object_index].state = GhostLadderState::FALLING;
-            printf("[GHOST LADDER] Ghost ladder %d started falling!\n", hit_result.object_index);
         }
 
         SpawnSlingshotImpact(g_SlingshotProjectile.position);
@@ -1865,7 +1823,6 @@ static void UpdateGhostLadders(float delta_time)
         {
             gl.current_y_offset = gl.final_y_offset;
             gl.state = GhostLadderState::GROUNDED;
-            printf("[GHOST LADDER] Grounded at final position: y_offset=%.2f\n", gl.final_y_offset);
         }
     }
 }
@@ -1915,7 +1872,7 @@ static void DrawSlingshotReticle()
     glUseProgram(g_GpuProgramID);
 
     const glm::mat4 identity(1.0f);
-    const glm::mat4 ortho = glm::ortho(-1.0f, 1.0f, -1.0f, 1.0f, -1.0f, 1.0f);
+    const glm::mat4 ortho = Matrix_Orthographic(-1.0f, 1.0f, -1.0f, 1.0f, -1.0f, 1.0f);
     glUniformMatrix4fv(g_projection_uniform, 1, GL_FALSE, glm::value_ptr(ortho));
     glUniformMatrix4fv(g_view_uniform, 1, GL_FALSE, glm::value_ptr(identity));
     glUniformMatrix4fv(g_model_uniform, 1, GL_FALSE, glm::value_ptr(identity));
@@ -2884,8 +2841,6 @@ int main()
         {
             if (!instances[i].has_aabb)
             {
-                printf("[JSON] Objeto '%s' na cena scene%02d sem AABB. Computando...\n",
-                       instances[i].model_path.c_str(), scene_idx);
                 AutoComputeAABB(instances[i]);
                 // Salva de volta no JSON
                 SaveAabbToSceneJSON(scene_idx, (int)i, instances[i].aabb_min, instances[i].aabb_max);
@@ -2972,7 +2927,7 @@ int main()
             }
         }
     }
-    printf("Total de portas: %zu\n", g_Doors.size());
+
 
     // Coleta todos os baus (CHEST) apenas do objects.json
     g_Chests.clear();
@@ -2991,12 +2946,11 @@ int main()
                 chest.bbox_max = instances[i].aabb_max;
                 chest.item = instances[i].item;
                 g_Chests.push_back(chest);
-                printf("  Bau encontrado: center=(%.1f,%.1f,%.1f)\n",
-                       chest.bbox_center.x, chest.bbox_center.y, chest.bbox_center.z);
+
             }
         }
     }
-    printf("Total de baus: %zu\n", g_Chests.size());
+
 
     // Coleta todas as cobwebs (COBWEB_FLOORHOLE) de todas as cenas
     g_Cobwebs.clear();
@@ -3013,12 +2967,11 @@ int main()
                 cw.bbox_min = cs.bbox_min;
                 cw.bbox_max = cs.bbox_max;
                 g_Cobwebs.push_back(cw);
-                printf("  Cobweb encontrada: center=(%.1f,%.1f,%.1f)\n",
-                       cw.bbox_center.x, cw.bbox_center.y, cw.bbox_center.z);
+
             }
         }
     }
-    printf("Total de cobwebs: %zu\n", g_Cobwebs.size());
+
 
     // Coleta todas as ghost ladders (GHOST_LADDER) de todas as cenas
     g_GhostLadders.clear();
@@ -3039,15 +2992,11 @@ int main()
                 gl.original_triangles = cs.triangles;
                 gl.scene_part_index = (int)part_idx;
                 g_GhostLadders.push_back(gl);
-                printf("  Ghost ladder encontrada: center=(%.1f,%.1f,%.1f) triangles=%zu bbox=[(%.1f,%.1f,%.1f)-(%.1f,%.1f,%.1f)]\n",
-                       gl.bbox_center.x, gl.bbox_center.y, gl.bbox_center.z,
-                       gl.original_triangles.size(),
-                       gl.bbox_min.x, gl.bbox_min.y, gl.bbox_min.z,
-                       gl.bbox_max.x, gl.bbox_max.y, gl.bbox_max.z);
+
             }
         }
     }
-    printf("Total de ghost ladders: %zu\n", g_GhostLadders.size());
+
 
     LoadGhostLadderConfig();
 
@@ -3134,7 +3083,7 @@ int main()
         for (const auto &name : part.render_object_names)
             g_ScenarioObjectNames.push_back(name);
 
-    const std::string player_model_path = ResolveScene00Path("../../Sword and Shield Pack/childlink_v2_clean.fbx", "Sword and Shield Pack/childlink_v2_clean.fbx");
+    const std::string player_model_path = ResolveScene00Path("../../assets/char/childlink_v2_clean.fbx", "assets/char/childlink_v2_clean.fbx");
     const std::string fairy_model_path = ResolveScene00Path("../../assets/navi/Navi.obj", "assets/navi/Navi.obj");
     const std::string deku_baba_model_path = ResolveScene00Path("../../assets/enemies/Deku Baba/Deku Baba/Dekubaba.obj", "assets/enemies/Deku Baba/Deku Baba/Dekubaba.obj");
     const std::string deku_scrub_model_path = ResolveScene00Path("../../assets/enemies/Deku Scrub/Deku Scrub (Forest Stage).obj", "assets/enemies/Deku Scrub/Deku Scrub (Forest Stage).obj");
@@ -3152,72 +3101,47 @@ int main()
     }
     
     // Carrega animações separadamente
-    std::string walkAnimPath = ResolveScene00Path("../../Sword and Shield Pack/sword and shield walk.fbx", "Sword and Shield Pack/sword and shield walk.fbx");
-    printf("Walk animation path resolved: '%s'\n", walkAnimPath.c_str());
-    if (!g_PlayerModelLoader.AddAnimation(walkAnimPath)) {
-        printf("WARNING: Could not load walk animation from %s\n", walkAnimPath.c_str());
-    }
+    std::string walkAnimPath = ResolveScene00Path("../../assets/char/animations/sword_and_shield/sword and shield walk.fbx", "assets/char/animations/sword_and_shield/sword and shield walk.fbx");
+    g_PlayerModelLoader.AddAnimation(walkAnimPath);
     
-    std::string idleAnimPath = ResolveScene00Path("../../Sword and Shield Pack/sword and shield idle.fbx", "Sword and Shield Pack/sword and shield idle.fbx");
-    if (!g_PlayerModelLoader.AddAnimation(idleAnimPath)) {
-        printf("WARNING: Could not load idle animation from %s\n", idleAnimPath.c_str());
-    }
+    std::string idleAnimPath = ResolveScene00Path("../../assets/char/animations/sword_and_shield/sword and shield idle.fbx", "assets/char/animations/sword_and_shield/sword and shield idle.fbx");
+    g_PlayerModelLoader.AddAnimation(idleAnimPath);
     
-    std::string runAnimPath = ResolveScene00Path("../../Sword and Shield Pack/sword and shield run.fbx", "Sword and Shield Pack/sword and shield run.fbx");
-    printf("Run animation path resolved: '%s'\n", runAnimPath.c_str());
-    if (!g_PlayerModelLoader.AddAnimation(runAnimPath)) {
-        printf("WARNING: Could not load run animation from %s\n", runAnimPath.c_str());
-    }
+    std::string runAnimPath = ResolveScene00Path("../../assets/char/animations/sword_and_shield/sword and shield run.fbx", "assets/char/animations/sword_and_shield/sword and shield run.fbx");
+    g_PlayerModelLoader.AddAnimation(runAnimPath);
     
-    std::string attackAnimPath = ResolveScene00Path("../../Sword and Shield Pack/sword and shield attack.fbx", "Sword and Shield Pack/sword and shield attack.fbx");
-    printf("Attack animation path resolved: '%s'\n", attackAnimPath.c_str());
-    if (!g_PlayerModelLoader.AddAnimation(attackAnimPath)) {
-        printf("WARNING: Could not load attack animation from %s\n", attackAnimPath.c_str());
-    }
+    std::string attackAnimPath = ResolveScene00Path("../../assets/char/animations/sword_and_shield/sword and shield attack.fbx", "assets/char/animations/sword_and_shield/sword and shield attack.fbx");
+    g_PlayerModelLoader.AddAnimation(attackAnimPath);
     
-    std::string blockAnimPath = ResolveScene00Path("../../Sword and Shield Pack/sword and shield block idle.fbx", "Sword and Shield Pack/sword and shield block idle.fbx");
-    printf("Block idle animation path resolved: '%s'\n", blockAnimPath.c_str());
-    if (!g_PlayerModelLoader.AddAnimation(blockAnimPath)) {
-        printf("WARNING: Could not load block idle animation from %s\n", blockAnimPath.c_str());
-    }
+    std::string blockAnimPath = ResolveScene00Path("../../assets/char/animations/sword_and_shield/sword and shield block idle.fbx", "assets/char/animations/sword_and_shield/sword and shield block idle.fbx");
+    g_PlayerModelLoader.AddAnimation(blockAnimPath);
     
-    std::string jumpAnimPath = ResolveScene00Path("../../Sword and Shield Pack/sword and shield jump.fbx", "Sword and Shield Pack/sword and shield jump.fbx");
-    printf("Jump animation path resolved: '%s'\n", jumpAnimPath.c_str());
-    if (!g_PlayerModelLoader.AddAnimation(jumpAnimPath)) {
-        printf("WARNING: Could not load jump animation from %s\n", jumpAnimPath.c_str());
-    }
+    std::string jumpAnimPath = ResolveScene00Path("../../assets/char/animations/sword_and_shield/sword and shield jump.fbx", "assets/char/animations/sword_and_shield/sword and shield jump.fbx");
+    g_PlayerModelLoader.AddAnimation(jumpAnimPath);
 
     // Carrega variantes de ataque
     struct AttackVariant { const char *label; const char *path; };
     std::vector<AttackVariant> attackVariants = {
-        {"attack",       "../../Sword and Shield Pack/sword and shield attack.fbx"},
-        {"attack (2)",   "../../Sword and Shield Pack/sword and shield attack (2).fbx"},
-        {"attack (3)",   "../../Sword and Shield Pack/sword and shield attack (3).fbx"},
-        {"attack (4)",   "../../Sword and Shield Pack/sword and shield attack (4).fbx"},
-        {"slash",        "../../Sword and Shield Pack/sword and shield slash.fbx"},
-        {"slash (2)",    "../../Sword and Shield Pack/sword and shield slash (2).fbx"},
-        {"slash (3)",    "../../Sword and Shield Pack/sword and shield slash (3).fbx"},
-        {"slash (4)",    "../../Sword and Shield Pack/sword and shield slash (4).fbx"},
-        {"slash (5)",    "../../Sword and Shield Pack/sword and shield slash (5).fbx"},
-        {"kick",         "../../Sword and Shield Pack/sword and shield kick.fbx"},
+        {"attack",       "../../assets/char/animations/sword_and_shield/sword and shield attack.fbx"},
+        {"attack (2)",   "../../assets/char/animations/sword_and_shield/sword and shield attack (2).fbx"},
+        {"attack (3)",   "../../assets/char/animations/sword_and_shield/sword and shield attack (3).fbx"},
+        {"attack (4)",   "../../assets/char/animations/sword_and_shield/sword and shield attack (4).fbx"},
+        {"slash",        "../../assets/char/animations/sword_and_shield/sword and shield slash.fbx"},
+        {"slash (2)",    "../../assets/char/animations/sword_and_shield/sword and shield slash (2).fbx"},
+        {"slash (3)",    "../../assets/char/animations/sword_and_shield/sword and shield slash (3).fbx"},
+        {"slash (4)",    "../../assets/char/animations/sword_and_shield/sword and shield slash (4).fbx"},
+        {"slash (5)",    "../../assets/char/animations/sword_and_shield/sword and shield slash (5).fbx"},
+        {"kick",         "../../assets/char/animations/sword_and_shield/sword and shield kick.fbx"},
     };
     for (const auto &v : attackVariants)
     {
         std::string path = ResolveScene00Path(v.path, v.path);
         if (g_PlayerModelLoader.AddAnimation(path)) {
             g_AttackVariantNames.push_back(v.label);
-            printf("  Attack variant loaded: '%s'\n", v.label);
-        } else {
-            printf("  WARNING: Could not load attack variant '%s'\n", v.label);
         }
     }
-    printf("Total attack variants: %zu\n", g_AttackVariantNames.size());
-    for (size_t i = 0; i < g_AttackVariantNames.size(); ++i)
-        printf("    [%zu] %s\n", i, g_AttackVariantNames[i].c_str());
 
     g_PlayerStateMachine.SetAttackVariant(g_CurrentAttackVariant);
-    
-    printf("Total animations loaded: %zu\n", g_PlayerModelLoader.GetAnimations().size());
     
     BuildTrianglesFromAssimpAndAddToVirtualScene(g_PlayerModelLoader);
     
@@ -3237,8 +3161,6 @@ int main()
         if (name.find("nodes_28_") == 0 || name.find("nodes_30_") == 0)
             g_SwordObjectNames.push_back(name);
     }
-    printf("Sword loaded: %zu objects, scale=%.4f\n", g_SwordObjectNames.size(), g_SwordModelScale);
-    for (const auto &n : g_SwordObjectNames) printf("  sword obj: '%s'\n", n.c_str());
 
     const std::string shield_model_path = ResolveScene00Path("../../assets/char/shield.obj", "assets/char/shield.obj");
     ObjModel shield_model(shield_model_path.c_str());
@@ -3255,7 +3177,7 @@ int main()
         if (name.find("nodes_33_") == 0)
             g_ShieldObjectNames.push_back(name);
     }
-    printf("Shield loaded: %zu objects, scale=%.4f\n", g_ShieldObjectNames.size(), g_ShieldModelScale);
+
 
     // Cria attachments para espada e escudo
     InitAttachments();
@@ -3303,8 +3225,7 @@ int main()
         g_SlingshotAttachment->localRotationDeg = glm::vec3(330.0f, 790.0f, 280.0f);
         g_SlingshotAttachment->visible = false;
     }
-    printf("Slingshot loaded: %zu objects\n", g_SlingshotObjectNames.size());
-    for (const auto &n : g_SlingshotObjectNames) printf("  slingshot obj: '%s'\n", n.c_str());
+
 
     BuildTrianglesFromAssimpAndAddToVirtualScene(g_PlayerModelLoader);
     
@@ -3395,8 +3316,6 @@ int main()
                    mapping.meshIndex, texFile.c_str(), texID, width, height);
             stbi_image_free(data);
         } else {
-            printf("WARNING: Could not load texture '%s' for mesh %zu\n",
-                   texFile.c_str(), mapping.meshIndex);
         }
     }
     
@@ -3418,10 +3337,9 @@ int main()
     g_PlayerCubeHalfExtents *= 0.8f;
 
     // Mede stride length das animações e sincroniza velocidade de movimento
-    printf("\n=== STRIDE LENGTH COMPUTATION ===\n");
     {
-        const int walkAnimIdx = 1; // WALK animation index (matches GetAnimationIndex)
-        const int runAnimIdx  = 3; // RUN animation index
+        const int walkAnimIdx = 1;
+        const int runAnimIdx  = 3;
 
         float walkSpeed = ComputeStrideLength(g_PlayerModelLoader, walkAnimIdx,
                                                player_model_scale, "WALK");
@@ -3430,21 +3348,12 @@ int main()
 
         if (walkSpeed > 0.0f) {
             g_PlayerStateMachine.SetWalkSpeed(walkSpeed);
-            printf("[STRIDE] WALK speed updated: %.4f u/s (was 3.5)\n", walkSpeed);
-        } else {
-            printf("[STRIDE] WALK stride failed, keeping default %.4f u/s\n",
-                   g_PlayerStateMachine.GetWalkSpeed());
         }
 
         if (runSpeed > 0.0f) {
             g_PlayerStateMachine.SetRunSpeed(runSpeed);
-            printf("[STRIDE] RUN  speed updated: %.4f u/s (was 6.0)\n", runSpeed);
-        } else {
-            printf("[STRIDE] RUN  stride failed, keeping default %.4f u/s\n",
-                   g_PlayerStateMachine.GetRunSpeed());
         }
     }
-    printf("=== END STRIDE COMPUTATION ===\n\n");
 
     // Carregamos o modelo provisório da fada.
     ObjModel fairy_model(fairy_model_path.c_str());
@@ -4288,7 +4197,6 @@ int main()
                 if (animIdx != g_LastAnimIdx) {
                     g_PlayerAnimationTime = 0.0f;
                     g_LastAnimIdx = animIdx;
-                    printf("[ANIM DEBUG] Animation changed to index %d, animation time reset to 0\n", animIdx);
                 }
 
                 g_PlayerModelLoader.SetCurrentAnimation(animIdx);
@@ -4306,12 +4214,6 @@ int main()
                 }
 
                 g_AnimDebugFrameCounter++;
-                if (g_AnimDebugFrameCounter % g_AnimDebugPrintInterval == 0) {
-                    float timeInTicks = g_PlayerAnimationTime * tps;
-                    float animCycleTime = fmod(timeInTicks, dur > 0.0f ? dur : 1.0f);
-                    printf("[ANIM DEBUG] time=%.4fs tps=%.2f duration=%.2f ticks=%.2f cycle=%.2f speedMult=%.2f\n",
-                           g_PlayerAnimationTime, tps, dur, timeInTicks, animCycleTime, g_AnimationSpeedMultiplier);
-                }
 
                 g_PlayerAnimationTransforms.resize(g_PlayerModelLoader.GetNumBones());
                 g_PlayerModelLoader.GetBoneTransforms(g_PlayerAnimationTime, g_PlayerAnimationTransforms);
@@ -4341,24 +4243,10 @@ int main()
                     hipsRefPos = hipsPos;
                     hipsDelta  = glm::vec4(0.0f);
                     hipsRefSet = true;
-                    if (wrapped) {
-                        printf("[HIPS WRAP] Cycle wrapped at animTick=%.2f, "
-                               "hipsRef reset to (%.2f,%.2f,%.2f)\n",
-                               animTick, hipsPos.x, hipsPos.y, hipsPos.z);
-                    }
                 } else {
                     hipsDelta = hipsPos - hipsRefPos;
                 }
 
-                if (g_AnimDebugFrameCounter % g_AnimDebugPrintInterval == 0) {
-                    printf("[HIPS DEBUG] hipsPos=(%.1f,%.1f,%.1f) ref=(%.1f,%.1f,%.1f) "
-                           "delta=(%.1f,%.1f,%.1f)\n",
-                           hipsPos.x, hipsPos.y, hipsPos.z,
-                           hipsRefPos.x, hipsRefPos.y, hipsRefPos.z,
-                           hipsDelta.x, hipsDelta.y, hipsDelta.z);
-                }
-
-                // Cancela root motion: subtrai XZ, ignora Y (bounce já está nos ossos)
                 glm::vec4 cancelDelta = hipsDelta;
                 cancelDelta.y = 0.0f;
 
@@ -4368,20 +4256,6 @@ int main()
 
                 visualPos = g_PlayerCubePosition - worldCancel;
 
-                {
-                    static int cancelLog = 0;
-                    cancelLog++;
-                    if (cancelLog % 10 == 0) {
-                        glm::vec4 diff = visualPos - g_PlayerCubePosition;
-                        printf("[ROOT CANCEL] delta=(%.1f,%.1f,%.1f) cancel=(%.3f,%.3f,%.3f) "
-                               "visualPos=(%.3f,%.3f,%.3f) root=(%.3f,%.3f,%.3f) diff=(%.3f,%.3f,%.3f)\n",
-                               hipsDelta.x, hipsDelta.y, hipsDelta.z,
-                               worldCancel.x, worldCancel.y, worldCancel.z,
-                               visualPos.x, visualPos.y, visualPos.z,
-                               g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
-                               diff.x, diff.y, diff.z);
-                    }
-                }
             } else {
                 glUniform1i(g_use_animation_uniform, 0);
             }
@@ -4461,31 +4335,6 @@ int main()
 
                     for (const auto &name : att->objectNames)
                         DrawVirtualObject(name.c_str());
-                }
-
-                // Debug: imprime posições a cada 120 frames
-                if (g_AnimDebugFrameCounter % g_AnimDebugPrintInterval == 0)
-                {
-                    printf("[WEAPON] Player=(%.1f,%.1f,%.1f) Ataque='%s'\n",
-                           visualPos.x, visualPos.y, visualPos.z,
-                           g_CurrentAttackVariant < (int)g_AttackVariantNames.size() ?
-                               g_AttackVariantNames[g_CurrentAttackVariant].c_str() : "none");
-                    if (g_SwordAttachment)
-                        printf("  Sword  bone='%s' pos=(%.1f,%.1f,%.1f) rot=(%.0f,%.0f,%.0f)\n",
-                               g_SwordAttachment->boneName.c_str(),
-                               g_SwordAttachment->localPosition.x, g_SwordAttachment->localPosition.y, g_SwordAttachment->localPosition.z,
-                               g_SwordAttachment->localRotationDeg.x, g_SwordAttachment->localRotationDeg.y, g_SwordAttachment->localRotationDeg.z);
-                    if (g_ShieldAttachment)
-                        printf("  Shield bone='%s' pos=(%.1f,%.1f,%.1f) rot=(%.0f,%.0f,%.0f)\n",
-                               g_ShieldAttachment->boneName.c_str(),
-                               g_ShieldAttachment->localPosition.x, g_ShieldAttachment->localPosition.y, g_ShieldAttachment->localPosition.z,
-                               g_ShieldAttachment->localRotationDeg.x, g_ShieldAttachment->localRotationDeg.y, g_ShieldAttachment->localRotationDeg.z);
-                    if (g_SlingshotAttachment)
-                        printf("  Slingshot bone='%s' pos=(%.1f,%.1f,%.1f) rot=(%.0f,%.0f,%.0f) visible=%d\n",
-                               g_SlingshotAttachment->boneName.c_str(),
-                               g_SlingshotAttachment->localPosition.x, g_SlingshotAttachment->localPosition.y, g_SlingshotAttachment->localPosition.z,
-                               g_SlingshotAttachment->localRotationDeg.x, g_SlingshotAttachment->localRotationDeg.y, g_SlingshotAttachment->localRotationDeg.z,
-                               g_SlingshotAttachment->visible ? 1 : 0);
                 }
 
                 glUniform1i(g_has_player_texture_uniform, g_HasPlayerTexture ? 1 : 0);
@@ -4620,10 +4469,6 @@ int main()
             }
 
             if (g_AnimDebugFrameCounter % g_AnimDebugPrintInterval == 0) {
-                printf("[HITBOX DEBUG] pos=(%.4f,%.4f,%.4f) halfExt=(%.4f,%.4f,%.4f) yaw=%.4f\n",
-                       g_PlayerCubePosition.x, g_PlayerCubePosition.y, g_PlayerCubePosition.z,
-                       g_PlayerCubeHalfExtents.x, g_PlayerCubeHalfExtents.y, g_PlayerCubeHalfExtents.z,
-                       g_PlayerYaw);
             }
 
             // Draw ladder hitboxes (yellow wireframe)
@@ -6338,16 +6183,11 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
         if (g_SlingshotTuningMode)
         {
             SetAttachmentVisible(g_SlingshotAttachment, true);
-            printf("[F2] Slingshot tuning mode ON.\n");
-            printf("     WASD = pos X/Z,  Q/E = height Y\n");
-            printf("     Arrows = rot X/Y,  R/F = roll Z\n");
-            printf("     SHIFT = fast,  SPACE = print values,  F2 = exit\n");
         }
         else
         {
             if (!g_SlingshotEquipped)
                 SetAttachmentVisible(g_SlingshotAttachment, false);
-            printf("[F2] Slingshot tuning mode OFF.\n");
         }
         fflush(stdout);
     }
@@ -6376,14 +6216,6 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
 
         if (key == GLFW_KEY_SPACE && action == GLFW_PRESS && g_SlingshotAttachment)
         {
-            printf("[SLINGSHOT] pos=(%.1f, %.1f, %.1f)  rot=(%.1f, %.1f, %.1f)\n",
-                   g_SlingshotAttachment->localPosition.x,
-                   g_SlingshotAttachment->localPosition.y,
-                   g_SlingshotAttachment->localPosition.z,
-                   g_SlingshotAttachment->localRotationDeg.x,
-                   g_SlingshotAttachment->localRotationDeg.y,
-                   g_SlingshotAttachment->localRotationDeg.z);
-            fflush(stdout);
         }
 
         return; // consume key — skip normal gameplay input
@@ -6472,7 +6304,6 @@ void KeyCallback(GLFWwindow *window, int key, int scancode, int action, int mod)
         if (idx < (int)g_AttackVariantNames.size()) {
             g_CurrentAttackVariant = idx;
             g_PlayerStateMachine.SetAttackVariant(idx);
-            printf("[ATTACK] Variante selecionada: %d = '%s'\n", idx, g_AttackVariantNames[idx].c_str());
         }
     }
 }

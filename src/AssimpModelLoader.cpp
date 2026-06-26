@@ -45,84 +45,10 @@ bool AssimpModelLoader::LoadModel(const std::string& filePath) {
     ProcessNode(m_scene->mRootNode, m_scene);
     ProcessAnimations(m_scene);
     
-    printf("=== FBX Loading Report ===\n");
-    printf("Meshes: %zu\n", m_meshes.size());
-    printf("Materials: %zu\n", m_materials.size());
-    printf("Animations: %zu\n", m_animations.size());
-    printf("Bones: %u\n", m_numBones);
-    
-    // Print root node transform
-    printf("Root node transform:\n");
-    for (int r = 0; r < 4; r++) {
-        printf("  [%.4f, %.4f, %.4f, %.4f]\n",
-               m_scene->mRootNode->mTransformation[r][0],
-               m_scene->mRootNode->mTransformation[r][1],
-               m_scene->mRootNode->mTransformation[r][2],
-               m_scene->mRootNode->mTransformation[r][3]);
-    }
-    printf("Global inverse transform:\n");
-    for (int r = 0; r < 4; r++) {
-        printf("  [%.4f, %.4f, %.4f, %.4f]\n",
-               m_globalInverseTransform[r][0],
-               m_globalInverseTransform[r][1],
-               m_globalInverseTransform[r][2],
-               m_globalInverseTransform[r][3]);
-    }
-    
-    if (!m_animations.empty()) {
-        printf("Animation: name='%s', duration=%.2f, tps=%.2f, channels=%zu\n",
-               m_animations[0].name.c_str(), m_animations[0].duration,
-               m_animations[0].ticksPerSecond, m_animations[0].channels.size());
-        
-        // Print all channel names with key counts
-        printf("Channel names:\n");
-        for (size_t i = 0; i < m_animations[0].channels.size(); i++) {
-            printf("  '%s' posKeys=%zu rotKeys=%zu scaleKeys=%zu\n",
-                   m_animations[0].channels[i].nodeName.c_str(),
-                   m_animations[0].channels[i].positions.size(),
-                   m_animations[0].channels[i].rotations.size(),
-                   m_animations[0].channels[i].scales.size());
-        }
-    }
-    
-    // Print first bone offset
-    if (!m_boneInfoMap.empty()) {
-        auto it = m_boneInfoMap.begin();
-        printf("First bone '%s' offset:\n", it->first.c_str());
-        for (int r = 0; r < 4; r++) {
-            printf("  [%.4f, %.4f, %.4f, %.4f]\n",
-                   it->second.offset[r][0], it->second.offset[r][1],
-                   it->second.offset[r][2], it->second.offset[r][3]);
-        }
-    }
-    
-    // Print vertex bounds
-    float min_x = 1e10, max_x = -1e10;
-    float min_y = 1e10, max_y = -1e10;
-    float min_z = 1e10, max_z = -1e10;
-    for (const auto& mesh : m_meshes) {
-        for (size_t i = 0; i < mesh.vertices.size(); i += 3) {
-            float x = mesh.vertices[i];
-            float y = mesh.vertices[i+1];
-            float z = mesh.vertices[i+2];
-            if (x < min_x) min_x = x;
-            if (x > max_x) max_x = x;
-            if (y < min_y) min_y = y;
-            if (y > max_y) max_y = y;
-            if (z < min_z) min_z = z;
-            if (z > max_z) max_z = z;
-        }
-    }
-    printf("Vertex bounds: X[%.2f, %.2f] Y[%.2f, %.2f] Z[%.2f, %.2f]\n",
-           min_x, max_x, min_y, max_y, min_z, max_z);
-    printf("Model size: (%.2f, %.2f, %.2f)\n", max_x-min_x, max_y-min_y, max_z-min_z);
-    printf("===========================\n");
-    
     return true;
 }
 
 bool AssimpModelLoader::LoadAnimation(const std::string& filePath) {
-    printf("Attempting to load animation from: '%s'\n", filePath.c_str());
     Assimp::Importer animImporter;
     
     // Tenta carregar com flags mínimas (pode ser arquivo de animação pura)
@@ -134,7 +60,6 @@ bool AssimpModelLoader::LoadAnimation(const std::string& filePath) {
     }
     
     if (!animScene->HasAnimations()) {
-        printf("No animations found in %s\n", filePath.c_str());
         return false;
     }
 
@@ -148,9 +73,6 @@ bool AssimpModelLoader::LoadAnimation(const std::string& filePath) {
         anim.name = animation->mName.length > 0 ? animation->mName.C_Str() : "animation_" + std::to_string(i);
         anim.duration = animation->mDuration;
         anim.ticksPerSecond = animation->mTicksPerSecond > 0 ? animation->mTicksPerSecond : 30.0f;
-        
-        printf("Loading animation: name='%s', duration=%.2f, tps=%.2f, channels=%u\n",
-               anim.name.c_str(), anim.duration, anim.ticksPerSecond, animation->mNumChannels);
         
         for (unsigned int j = 0; j < animation->mNumChannels; j++) {
             aiNodeAnim* channel = animation->mChannels[j];
@@ -202,12 +124,10 @@ bool AssimpModelLoader::LoadAnimation(const std::string& filePath) {
         break;
     }
     
-    printf("Loaded %zu animations from %s\n", m_animations.size(), filePath.c_str());
     return !m_animations.empty();
 }
 
 bool AssimpModelLoader::AddAnimation(const std::string& filePath) {
-    printf("Attempting to add animation from: '%s'\n", filePath.c_str());
     Assimp::Importer animImporter;
     
     const aiScene* animScene = animImporter.ReadFile(filePath, 0);
@@ -218,7 +138,6 @@ bool AssimpModelLoader::AddAnimation(const std::string& filePath) {
     }
     
     if (!animScene->HasAnimations()) {
-        printf("No animations found in %s\n", filePath.c_str());
         return false;
     }
 
@@ -229,9 +148,6 @@ bool AssimpModelLoader::AddAnimation(const std::string& filePath) {
         anim.name = animation->mName.length > 0 ? animation->mName.C_Str() : "animation_" + std::to_string(i);
         anim.duration = animation->mDuration;
         anim.ticksPerSecond = animation->mTicksPerSecond > 0 ? animation->mTicksPerSecond : 30.0f;
-        
-        printf("Adding animation: name='%s', duration=%.2f, tps=%.2f, channels=%u\n",
-               anim.name.c_str(), anim.duration, anim.ticksPerSecond, animation->mNumChannels);
         
         for (unsigned int j = 0; j < animation->mNumChannels; j++) {
             aiNodeAnim* channel = animation->mChannels[j];
@@ -282,7 +198,6 @@ bool AssimpModelLoader::AddAnimation(const std::string& filePath) {
         break; // Only load first animation per file
     }
     
-    printf("Total animations now: %zu\n", m_animations.size());
     return true;
 }
 
@@ -637,14 +552,6 @@ void AssimpModelLoader::GetBoneTransforms(float timeInSeconds, std::vector<glm::
     const AssimpAnimation& anim = m_animations[m_currentAnimation];
     float timeInTicks = timeInSeconds * anim.ticksPerSecond;
     float animationTime = fmod(timeInTicks, anim.duration > 0.0f ? anim.duration : 1.0f);
-    
-    static int boneDebugFrameCounter = 0;
-    boneDebugFrameCounter++;
-    if (boneDebugFrameCounter % 120 == 0) {
-        printf("[BONE DEBUG] anim='%s' idx=%d timeSec=%.4f tps=%.2f dur=%.2f timeTicks=%.2f animTick=%.2f chanCount=%zu\n",
-               anim.name.c_str(), m_currentAnimation, timeInSeconds, anim.ticksPerSecond,
-               anim.duration, timeInTicks, animationTime, anim.channels.size());
-    }
     
     ReadNodeHierarchy(animationTime, m_scene->mRootNode, glm::mat4(1.0f));
     
