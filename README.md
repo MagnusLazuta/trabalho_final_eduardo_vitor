@@ -31,7 +31,8 @@
 ## Uso de IA
 Agentes de IA foram bastante utilizados no desenvolvimento do trabalho, em especial Codex, Claude code. Para várias das funcionalidades eles foram usados como um criador de código inicial, a partir do qual refinamos os resultados manualmente ou com prompts adicionais, visto que as ferramentas muitas vezes não dão resultados adequados imediatamente. 
 ## Imagens de Ilustração
-
+![Ilustracao inicio](images/inicio.png)
+![Ilustracao sala bau](images/bau.png)
 ## Manual
 ### Atalhos
 - W/S - Movem o personagem para frente/trás. Enquanto escalando, move para cima/baixo.
@@ -44,7 +45,7 @@ Agentes de IA foram bastante utilizados no desenvolvimento do trabalho, em espec
 - Enter - Abre baús e portas próximas
 - O - Inicia ou termina a escalada de escadas ou vinhas.
 - Tab - Ativa o estilingue, desabilitando a espada/escudo.
-- Mouse Left - Atira com o estilingue enquanto em primeira pessoa ou com slingshot equipado.
+- Mouse Left - Atira com o estilingue enquanto em primeira pessoa e com slingshot equipado.
 - Movimento mouse - Controle da camera em primeira pessoa.
 - P - Ativa ou desativa visão em primeira pessoa.
 - K - Ativa ou desativa camera lock-on.
@@ -68,10 +69,11 @@ Agentes de IA foram bastante utilizados no desenvolvimento do trabalho, em espec
 - 1. Baixar e compilar a biblioteca assimp usando o comando abaixo:
 ```bash
 ./scripts/build_assimp.sh
-```
+```https://youtu.be/7O01x94PoC8?si=O0dMrrfWFa3Ugrcy
 
 - 2. Compilar o jogo todo e executar o jogo:
 ```bash
 cmake --workflow --preset configure-build-run
 ```
-
+## Vídeo de Demonstração
+[Video](https://youtu.be/7O01x94PoC8?si=O0dMrrfWFa3Ugrcy)
